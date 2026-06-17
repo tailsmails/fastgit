@@ -192,17 +192,18 @@ fn parse_github_owner_repo(url string) (string, string) {
 	if clean_url.ends_with('.git') {
 		clean_url = clean_url[0 .. clean_url.len - 4]
 	}
+	
+	if !clean_url.contains('github.com') {
+		return "", ""
+	}
+
 	mut path := ""
 	if clean_url.contains('github.com/') {
 		path = clean_url.all_after('github.com/')
 	} else if clean_url.contains('github.com:') {
 		path = clean_url.all_after('github.com:')
 	} else {
-		if clean_url.contains('/') {
-			path = clean_url
-		} else {
-			return "", ""
-		}
+		return "", ""
 	}
 	parts := path.split('/')
 	if parts.len >= 2 {
@@ -247,8 +248,30 @@ fn list_files_recursively(path string) []string {
 
 fn get_gitless_changed_files(repo_dir string, rel_path string, git_url string, token string, branch string, lazy_push bool) []string {
 	owner, repo := parse_github_owner_repo(git_url)
+	
 	if owner == '' || repo == '' {
-		return []string{}
+		println('Warning: Smart remote comparison is only supported for GitHub. Treating all local files as new/modified.')
+		
+		mut changed_files := []string{}
+		target_abs_path := os.real_path(os.join_path(repo_dir, rel_path))
+
+		mut local_files := []string{}
+		if os.is_dir(target_abs_path) {
+			local_files = list_files_recursively(target_abs_path)
+		} else if os.exists(target_abs_path) {
+			local_files = [target_abs_path]
+		}
+
+		for abs_file in local_files {
+			mut file_rel := abs_file.replace(os.real_path(repo_dir), '')
+			file_rel = file_rel.trim_left('/\\').replace('\\', '/')
+
+			if file_rel.starts_with('.git/') || file_rel == '.git' || file_rel == 'fastgit_block' || file_rel == 'fastgit' {
+				continue
+			}
+			changed_files << file_rel
+		}
+		return changed_files
 	}
 
 	println('Fetching file tree directly from remote GitHub repository...')
@@ -319,7 +342,7 @@ fn get_gitless_changed_files(repo_dir string, rel_path string, git_url string, t
 fn create_pull_request(git_url string, token string, title string, base string) {
 	owner, repo := parse_github_owner_repo(git_url)
 	if owner == "" || repo == "" {
-		println('Error: Could not parse GitHub owner and repository from URL.')
+		println('Error: Pull Request command is only supported for GitHub repositories.')
 		return
 	}
 	head := get_current_branch()
@@ -366,7 +389,7 @@ fn create_pull_request(git_url string, token string, title string, base string) 
 fn fork_repository(git_url string, token string) {
 	owner, repo := parse_github_owner_repo(git_url)
 	if owner == "" || repo == "" {
-		println('Error: Could not parse GitHub owner and repository from URL.')
+		println('Error: Fork command is only supported for GitHub repositories.')
 		return
 	}
 	println('Requesting to fork repository ${owner}/${repo} to your account...')
@@ -399,7 +422,7 @@ fn fork_repository(git_url string, token string) {
 fn sync_fork_with_upstream(git_url string, token string, branch string) {
 	owner, repo := parse_github_owner_repo(git_url)
 	if owner == "" || repo == "" {
-		println('Error: Could not parse GitHub owner and repository from URL.')
+		println('Error: Sync command is only supported for GitHub repositories.')
 		return
 	}
 	println('Syncing fork ${owner}/${repo} (branch: "${branch}") with upstream...')
@@ -444,12 +467,22 @@ fn sync_fork_with_upstream(git_url string, token string, branch string) {
 fn format_git_url(raw_url string, token string) string {
 	mut url := raw_url.trim_space()
 	
-	if url.starts_with('git@github.com:') {
-		path := url.all_after('git@github.com:')
-		url = 'https://github.com/' + path
-	} else if url.starts_with('ssh://git@github.com/') {
-		path := url.all_after('ssh://git@github.com/')
-		url = 'https://github.com/' + path
+	if url.starts_with('git@') {
+		content := url.all_after('git@')
+		parts := content.split(':')
+		if parts.len >= 2 {
+			domain := parts[0]
+			path := parts[1]
+			url = 'https://' + domain + '/' + path
+		}
+	} else if url.starts_with('ssh://git@') {
+		content := url.all_after('ssh://git@')
+		parts := content.split('/')
+		if parts.len >= 2 {
+			domain := parts[0]
+			path := parts[1..].join('/')
+			url = 'https://' + domain + '/' + path
+		}
 	}
 
 	if url.starts_with('https://') {
@@ -601,9 +634,9 @@ fn print_usage() {
 }
 
 fn main() {
-	os.setenv('GIT_CONFIG_COUNT', '1', true)
-	os.setenv('GIT_CONFIG_KEY_0', 'safe.directory', true)
-	os.setenv('GIT_CONFIG_VALUE_0', '*', true)
+	os.setenv('GIT_CONFIG_COUNT', '1', true) or {}
+	os.setenv('GIT_CONFIG_KEY_0', 'safe.directory', true) or {}
+	os.setenv('GIT_CONFIG_VALUE_0', '*', true) or {}
 
 	if os.args.len < 2 {
 		print_usage()
@@ -1085,7 +1118,7 @@ fn main() {
 
 		if !run_git_cmd(['git', 'config', 'user.name', 'FastGit'], 'Failed to config user.name') { return }
 		if !run_git_cmd(['git', 'config', 'user.email', email], 'Failed to config user.email') { return }
-		
+
 		mut files_to_add := []string{}
 		mut files_to_rm := []string{}
 		for file in changed_files {
