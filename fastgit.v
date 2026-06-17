@@ -170,6 +170,25 @@ fn ensure_email(email string) string {
 	return input_email
 }
 
+fn ensure_name(name string) string {
+	if name != '' {
+		return name
+	}
+	res := exec_git_cmd(['git', 'config', '--get', 'user.name'])
+	if res.exit_code == 0 {
+		existing_name := res.output.trim_space()
+		if existing_name != '' {
+			return existing_name
+		}
+	}
+	input_name := os.input('Enter your Git author name (e.g. John Doe): ').trim_space()
+	if input_name == '' {
+		eprintln('Error: Name cannot be empty.')
+		exit(1)
+	}
+	return input_name
+}
+
 fn get_current_branch() string {
 	res := exec_git_cmd(['git', 'branch', '--show-current'])
 	if res.exit_code == 0 {
@@ -667,12 +686,13 @@ fn print_usage() {
 	println('  ./fastgit sync <git_url> [branch_name]')
 	println('\nOptions:')
 	println('  -e, --email <email>    GitHub anonymous email (Anonymous / No-Reply)')
+	println('  -n, --name <name>      Git author name')
 	println('  -t, --token <token>    GitHub Personal Access Token')
 	println('  -y, --yes              Skip upload confirmation')
 	println('  -b, --branch <branch>  Target branch (default: current branch or main)')
 	println('  -l, --lazy             Lazy push (do not delete remote files that are missing locally)')
 	println('  -f, --force            Use absolute force push (bypasses safety and overrides default --force-with-lease)')
-	println('\nNote: You can also set FASTGIT_EMAIL and FASTGIT_TOKEN environment variables.')
+	println('\nNote: You can also set FASTGIT_EMAIL, FASTGIT_NAME and FASTGIT_TOKEN environment variables.')
 }
 
 fn main() {
@@ -686,6 +706,7 @@ fn main() {
 	}
 	mut positional_args := []string{}
 	mut email := os.getenv('FASTGIT_EMAIL')
+	mut name := os.getenv('FASTGIT_NAME')
 	mut token := os.getenv('FASTGIT_TOKEN')
 	mut branch_override := os.getenv('FASTGIT_BRANCH')
 	mut auto_confirm := os.getenv('FASTGIT_AUTO_CONFIRM') == 'true'
@@ -697,6 +718,13 @@ fn main() {
 		if arg == '--email' || arg == '-e' {
 			if i + 1 < os.args.len {
 				email = os.args[i+1]
+				i += 2
+			} else {
+				i++
+			}
+		} else if arg == '--name' || arg == '-n' {
+			if i + 1 < os.args.len {
+				name = os.args[i+1]
 				i += 2
 			} else {
 				i++
@@ -809,6 +837,7 @@ fn main() {
 		git_url := positional_args[2]
 
 		email = ensure_email(email)
+		name = ensure_name(name)
 
 		mut branch := 'main'
 		if branch_override != '' {
@@ -862,7 +891,7 @@ fn main() {
 			if !run_git_cmd(['git', 'checkout', '-B', branch], 'Failed to checkout branch') { return }
 		}
 
-		if !run_git_cmd(['git', 'config', 'user.name', 'FastGit'], 'Failed to config user.name') { return }
+		if !run_git_cmd(['git', 'config', 'user.name', name], 'Failed to config user.name') { return }
 		if !run_git_cmd(['git', 'config', 'user.email', email], 'Failed to config user.email') { return }
 
 		commits := get_commit_list(branch)
@@ -909,6 +938,7 @@ fn main() {
 		commit_sha := positional_args[3]
 
 		email = ensure_email(email)
+		name = ensure_name(name)
 
 		mut branch := 'main'
 		if branch_override != '' {
@@ -962,7 +992,7 @@ fn main() {
 			if !run_git_cmd(['git', 'checkout', '-B', branch], 'Failed to checkout branch') { return }
 		}
 
-		if !run_git_cmd(['git', 'config', 'user.name', 'FastGit'], 'Failed to config user.name') { return }
+		if !run_git_cmd(['git', 'config', 'user.name', name], 'Failed to config user.name') { return }
 		if !run_git_cmd(['git', 'config', 'user.email', email], 'Failed to config user.email') { return }
 
 		commit_info := get_commit_info(commit_sha)
@@ -1045,6 +1075,7 @@ fn main() {
 		defer { os.chdir(original_wd) or {} }
 
 		email = ensure_email(email)
+		name = ensure_name(name)
 
 		mut branch := 'main'
 		if branch_override != '' {
@@ -1096,7 +1127,7 @@ fn main() {
 			if !run_git_cmd(['git', 'checkout', '-B', branch], 'Failed to checkout branch') { return }
 		}
 
-		if !run_git_cmd(['git', 'config', 'user.name', 'FastGit'], 'Failed to config user.name') { return }
+		if !run_git_cmd(['git', 'config', 'user.name', name], 'Failed to config user.name') { return }
 		if !run_git_cmd(['git', 'config', 'user.email', email], 'Failed to config user.email') { return }
 
 		formatted_url := format_git_url(git_url, token)
@@ -1136,6 +1167,7 @@ fn main() {
 		defer { os.chdir(original_wd) or {} }
 
 		email = ensure_email(email)
+		name = ensure_name(name)
 
 		mut branch := 'main'
 		if branch_override != '' {
@@ -1200,7 +1232,7 @@ fn main() {
 			}
 		}
 
-		if !run_git_cmd(['git', 'config', 'user.name', 'FastGit'], 'Failed to config user.name') { return }
+		if !run_git_cmd(['git', 'config', 'user.name', name], 'Failed to config user.name') { return }
 		if !run_git_cmd(['git', 'config', 'user.email', email], 'Failed to config user.email') { return }
 
 		mut files_to_add := []string{}
@@ -1241,6 +1273,7 @@ fn main() {
 		}
 
 		email = ensure_email(email)
+		name = ensure_name(name)
 
 		mut branch := 'main'
 		if branch_override != '' {
@@ -1276,7 +1309,7 @@ fn main() {
 			}
 		}
 
-		if !run_git_cmd(['git', 'config', 'user.name', 'FastGit'], 'Failed to config user.name') { return }
+		if !run_git_cmd(['git', 'config', 'user.name', name], 'Failed to config user.name') { return }
 		if !run_git_cmd(['git', 'config', 'user.email', email], 'Failed to config user.email') { return }
 
 		formatted_url := format_git_url(git_url, token)
