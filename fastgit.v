@@ -149,6 +149,14 @@ fn get_commit_list(branch string) []string {
 	return list
 }
 
+fn get_commit_info(sha string) string {
+	res := exec_git_cmd(['git', 'log', '-1', '--format=%h - %s (%an)', sha])
+	if res.exit_code == 0 {
+		return res.output.trim_space()
+	}
+	return sha
+}
+
 fn ensure_email(email string) string {
 	if email != '' {
 		return email
@@ -253,7 +261,7 @@ fn get_gitless_changed_files(repo_dir string, rel_path string, git_url string, t
 		println('Warning: Smart remote comparison is only supported for GitHub. Treating all local files as new/modified.')
 		
 		mut changed_files := []string{}
-		target_abs_path := os.real_path(os.join_path(repo_dir, rel_path))
+		target_abs_path := os.join_path(repo_dir, rel_path)
 
 		mut local_files := []string{}
 		if os.is_dir(target_abs_path) {
@@ -630,13 +638,14 @@ fn print_usage() {
 	println('  -y, --yes              Skip upload confirmation')
 	println('  -b, --branch <branch>  Target branch (default: current branch or main)')
 	println('  -l, --lazy             Lazy push (do not delete remote files that are missing locally)')
+	println('  -f, --force            Use absolute force push (bypasses safety and overrides default --force-with-lease)')
 	println('\nNote: You can also set FASTGIT_EMAIL and FASTGIT_TOKEN environment variables.')
 }
 
 fn main() {
-	os.setenv('GIT_CONFIG_COUNT', '1', true) or {}
-	os.setenv('GIT_CONFIG_KEY_0', 'safe.directory', true) or {}
-	os.setenv('GIT_CONFIG_VALUE_0', '*', true) or {}
+	os.setenv('GIT_CONFIG_COUNT', '1', true)
+	os.setenv('GIT_CONFIG_KEY_0', 'safe.directory', true)
+	os.setenv('GIT_CONFIG_VALUE_0', '*', true)
 
 	if os.args.len < 2 {
 		print_usage()
@@ -648,6 +657,7 @@ fn main() {
 	mut branch_override := os.getenv('FASTGIT_BRANCH')
 	mut auto_confirm := os.getenv('FASTGIT_AUTO_CONFIRM') == 'true'
 	mut lazy_push := false
+	mut use_absolute_force := false
 	mut i := 0
 	for i < os.args.len {
 		arg := os.args[i]
@@ -678,6 +688,9 @@ fn main() {
 		} else if arg == '--lazy' || arg == '-lazy' || arg == '-l' {
 			lazy_push = true
 			i++
+		} else if arg == '--force' || arg == '-f' {
+			use_absolute_force = true
+			i++
 		} else {
 			positional_args << arg
 			i++
@@ -699,6 +712,8 @@ fn main() {
 		}
 	}
 	original_wd := os.getwd()
+	
+	force_flag := if use_absolute_force { '--force' } else { '--force-with-lease' }
 
 	if positional_args[1] == 'fork' {
 		if positional_args.len < 3 {
@@ -823,6 +838,18 @@ fn main() {
 			return
 		}
 
+		target_sha := if commits.len == 1 { commits[0] } else { commits[commits.len - 1] }
+		commit_info := get_commit_info(target_sha)
+		println('\nWarning: This action will completely remove the following commit from local and remote history:')
+		println('  -> ${commit_info}')
+		if !auto_confirm {
+			ans := os.input('Do you want to proceed with this rollback? (y/n): ').trim_space().to_lower()
+			if ans != 'y' && ans != 'yes' {
+				println('Rollback canceled.')
+				return
+			}
+		}
+
 		if commits.len == 1 {
 			println('The repository has only 1 commit. Resetting repository to an empty state...')
 			if !run_git_cmd(['git', 'checkout', '--force', '--orphan', 'temp_orphan'], 'Failed to create orphan branch') { return }
@@ -834,8 +861,8 @@ fn main() {
 			if !run_git_cmd(['git', 'reset', '--hard', 'HEAD~1'], 'Failed to reset commit locally.') { return }
 		}
 		
-		println('Pushing roll-back to remote (force push)...')
-		if !run_git_cmd(['git', 'push', formatted_url, branch, '--force'], 'Failed to update remote') { return }
+		println('Pushing roll-back to remote (${force_flag})...')
+		if !run_git_cmd(['git', 'push', formatted_url, branch, force_flag], 'Failed to update remote') { return }
 		
 		println('Successfully removed the last commit from local and remote.')
 		return
@@ -905,6 +932,17 @@ fn main() {
 		if !run_git_cmd(['git', 'config', 'user.name', 'FastGit'], 'Failed to config user.name') { return }
 		if !run_git_cmd(['git', 'config', 'user.email', email], 'Failed to config user.email') { return }
 
+		commit_info := get_commit_info(commit_sha)
+		println('\nWarning: This action will completely remove the following commit from the history:')
+		println('  -> ${commit_info}')
+		if !auto_confirm {
+			ans := os.input('Do you want to proceed with removing this commit? (y/n): ').trim_space().to_lower()
+			if ans != 'y' && ans != 'yes' {
+				println('Operation canceled.')
+				return
+			}
+		}
+
 		println('Removing commit ${commit_sha} from history...')
 		
 		commits := get_commit_list(branch)
@@ -952,8 +990,8 @@ fn main() {
 			}
 		}
 
-		println('Pushing updated history to remote (force push)...')
-		if !run_git_cmd(['git', 'push', formatted_url, branch, '--force'], 'Failed to update remote') { return }
+		println('Pushing updated history to remote (${force_flag})...')
+		if !run_git_cmd(['git', 'push', formatted_url, branch, force_flag], 'Failed to update remote') { return }
 
 		println('Successfully removed commit ${commit_sha} from remote.')
 		return
@@ -996,6 +1034,15 @@ fn main() {
 			return
 		}
 
+		println('\nWarning: The "over" command will completely overwrite the remote history on branch "${branch}".')
+		if !auto_confirm {
+			ans := os.input('Are you sure you want to proceed with overwriting the remote history? (y/n): ').trim_space().to_lower()
+			if ans != 'y' && ans != 'yes' {
+				println('Push canceled.')
+				return
+			}
+		}
+
 		mut created_temp_git := false
 		defer {
 			if created_temp_git {
@@ -1036,8 +1083,8 @@ fn main() {
 		println('Committing changes...')
 		if !run_git_cmd(['git', 'commit', '-m', commit_msg], 'Failed to commit') { return }
 
-		println('Overwriting remote history (force push)...')
-		if !run_git_cmd(['git', 'push', formatted_url, branch, '--force'], 'Push failed') { return }
+		println('Overwriting remote history (${force_flag})...')
+		if !run_git_cmd(['git', 'push', formatted_url, branch, force_flag], 'Push failed') { return }
 		
 		println('Successfully force-pushed changes.')
 		return
@@ -1178,6 +1225,18 @@ fn main() {
 			println('Push canceled.')
 			return
 		}
+
+		commit_info := get_commit_info('HEAD')
+		println('\nWarning: This action will amend and overwrite the last commit on the remote branch "${branch}":')
+		println('  -> ${commit_info}')
+		if !auto_confirm {
+			ans := os.input('Do you want to proceed with amending and force-pushing? (y/n): ').trim_space().to_lower()
+			if ans != 'y' && ans != 'yes' {
+				println('Push canceled.')
+				return
+			}
+		}
+
 		if !run_git_cmd(['git', 'config', 'user.name', 'FastGit'], 'Failed to config user.name') { return }
 		if !run_git_cmd(['git', 'config', 'user.email', email], 'Failed to config user.email') { return }
 
@@ -1200,8 +1259,8 @@ fn main() {
 		println('Amending last commit...')
 		if !run_git_cmd(['git', 'commit', '--amend', '--no-edit'], 'Failed to amend commit') { return }
 
-		println('Force pushing updated commit to remote...')
-		if !run_git_cmd(['git', 'push', formatted_url, branch, '--force'], 'Push failed') { return }
+		println('Force pushing updated commit to remote (${force_flag})...')
+		if !run_git_cmd(['git', 'push', formatted_url, branch, force_flag], 'Push failed') { return }
 		
 		println('Successfully amended last commit and force pushed.')
 		return
