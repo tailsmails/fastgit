@@ -92,6 +92,51 @@ pkg update -y && pkg install -y git clang make && if ! command -v v >/dev/null 2
 
 ---
 
+## Safety & Content Shield (`fastgit_block`)
+
+FastGit actively scans your staged/changed files **before** any Git transaction takes place using a local rules file named `fastgit_block`. If any configured rules are violated, the push is aborted instantly [3].
+
+The validation file operates in one of two modes depending on how you structure it:
+
+### 1. Global Blocklist Mode (Default)
+If you do not define specific target files, FastGit acts as a blocklist. It prevents pushing any modified files that match the following patterns:
+
+*   **`filename + <regex>`**: Blocks the upload of files if their filename or relative path matches the regular expression.
+*   **`file + <regex>`**: Scans the *contents* of all modified files and blocks the push if any match the regular expression (highly useful to prevent leaking API keys, tokens, or credentials).
+
+**Example `fastgit_block` (Blocklist):**
+```ini
+# Ignore lines starting with '#'
+# Prevent uploading certificates or config files by path/name
+filename + \.pem$
+filename + config\.json$
+
+# Block file uploads if they contain sensitive content patterns
+file + (AIzaSy[A-Za-z0-9-_]{35})
+file + AWS_SECRET_ACCESS_KEY
+```
+
+### 2. Strict Whitelist Mode
+If you define one or more explicit local file paths using `file + <path/to/file>`, FastGit automatically switches to **Strict Whitelist Mode**. 
+
+In this mode:
+*   **Only** the explicitly declared files are allowed to be uploaded. Pushing any other modified or untracked files will fail with a whitelist violation error.
+*   You can nest specific regular expressions under each whitelisted file to restrict blocked patterns *only* inside those permitted files.
+
+**Example `fastgit_block` (Whitelist):**
+```ini
+# Only the following two files are allowed to be modified and pushed
+file + ./src/main.go
+  # Inside main.go, block hardcoded local IP addresses
+  file + 127\.0\.0\.1
+
+file + ./src/index.js
+  # Inside index.js, block test functions
+  file + function\s+test
+```
+
+---
+
 ## Threat & Isolation Model
 
 | Threat Vector | Mechanism | FastGit Strategy |
