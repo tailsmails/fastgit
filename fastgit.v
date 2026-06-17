@@ -274,6 +274,18 @@ fn list_files_recursively(path string) []string {
 	return res
 }
 
+fn setup_request_proxy(mut req http.Request) {
+	mut proxy_env := os.getenv('HTTPS_PROXY')
+	if proxy_env == '' {
+		proxy_env = os.getenv('HTTP_PROXY')
+	}
+	if proxy_env != '' {
+		if p := http.new_http_proxy(proxy_env) {
+			req.proxy = p
+		}
+	}
+}
+
 fn get_gitless_changed_files(repo_dir string, rel_path string, git_url string, token string, branch string, lazy_push bool) []string {
 	owner, repo := parse_github_owner_repo(git_url)
 	
@@ -305,6 +317,7 @@ fn get_gitless_changed_files(repo_dir string, rel_path string, git_url string, t
 	println('Fetching file tree directly from remote GitHub repository...')
 	api_url := 'https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1'
 	mut req := http.new_request(.get, api_url, '')
+	setup_request_proxy(mut req)
 	req.add_custom_header('Authorization', 'Bearer ${token}') or {}
 	req.add_custom_header('Accept', 'application/vnd.github+json') or {}
 	res := req.do() or {
@@ -390,6 +403,7 @@ fn create_pull_request(git_url string, token string, title string, base string) 
 	json_payload := json.encode(payload)
 
 	mut req := http.new_request(.post, api_url, json_payload)
+	setup_request_proxy(mut req)
 	req.add_header(.content_type, 'application/json')
 	req.add_custom_header('Authorization', 'Bearer ${token}') or {}
 	req.add_custom_header('Accept', 'application/vnd.github+json') or {}
@@ -423,6 +437,7 @@ fn fork_repository(git_url string, token string) {
 	println('Requesting to fork repository ${owner}/${repo} to your account...')
 	api_url := 'https://api.github.com/repos/${owner}/${repo}/forks'
 	mut req := http.new_request(.post, api_url, '{}')
+	setup_request_proxy(mut req)
 	req.add_header(.content_type, 'application/json')
 	req.add_custom_header('Authorization', 'Bearer ${token}') or {}
 	req.add_custom_header('Accept', 'application/vnd.github+json') or {}
@@ -462,6 +477,7 @@ fn sync_fork_with_upstream(git_url string, token string, branch string) {
 	json_payload := json.encode(payload)
 
 	mut req := http.new_request(.post, api_url, json_payload)
+	setup_request_proxy(mut req)
 	req.add_header(.content_type, 'application/json')
 	req.add_custom_header('Authorization', 'Bearer ${token}') or {}
 	req.add_custom_header('Accept', 'application/vnd.github+json') or {}
