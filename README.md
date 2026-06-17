@@ -94,27 +94,42 @@ pkg update -y && pkg install -y git clang make && if ! command -v v >/dev/null 2
 
 ## Safety & Content Shield (`fastgit_block`)
 
-FastGit actively scans your staged/changed files **before** any Git transaction takes place using a local rules file named `fastgit_block`. If any configured rules are violated, the push is aborted instantly [3].
+FastGit actively scans your staged/changed files **before** any Git transaction takes place using a local rules file named `fastgit_block`. If any block rules are violated, the push is aborted instantly [3]. If ignore rules are matched, those files are filtered out of the push transaction quietly.
 
-The validation file operates in one of two modes depending on how you structure it:
+The validation file supports three distinct modes depending on how you structure it:
 
-### 1. Global Blocklist Mode (Default)
-If you do not define specific target files, FastGit acts as a blocklist. It prevents pushing any modified files that match the following patterns:
+### 1. Global Block & Ignore Mode (Default)
+If you do not define specific target files, FastGit operates globally. It supports two operations for both filenames and file content:
+- **Block (`+`)**: Halts and **aborts** the entire push transaction if a match is found.
+- **Exclude (`-`)**: Silently **skips** matched files from the upload list and proceeds with the rest of the transaction without throwing any errors (acting like a content-aware, regex-powered `.gitignore`).
 
-*   **`filename + <regex>`**: Blocks the upload of files if their filename or relative path matches the regular expression.
-*   **`file + <regex>`**: Scans the *contents* of all modified files and blocks the push if any match the regular expression (highly useful to prevent leaking API keys, tokens, or credentials).
+#### Supported Patterns:
+*   **`filename + <regex>`**: Aborts the upload if the filename matches.
+*   **`filename - <regex>`**: Silently excludes the matched file from the upload.
+*   **`file + <regex>`**: Scans contents and aborts the push on any match (e.g., preventing AWS/GitHub token leaks).
+*   **`file - <regex>`**: Scans contents and silently excludes matched files from the upload list.
 
-**Example `fastgit_block` (Blocklist):**
+**Example `fastgit_block` (Block & Ignore):**
 ```ini
-# Ignore lines starting with '#'
-# Prevent uploading certificates or config files by path/name
+# --- SECURITY BLOCK RULES (Aborts Push on Match) ---
+# Prevent uploading certificates or config files
 filename + \.pem$
 filename + config\.json$
 
-# Block file uploads if they contain sensitive content patterns
-file + (AIzaSy[A-Za-z0-9-_]{35})
+# Prevent leaking AWS secrets
 file + AWS_SECRET_ACCESS_KEY
+
+
+# --- SILENT IGNORE RULES (Proceeds but skips the file) ---
+# Silently skip log files and editor swap files
+filename - \.log$
+filename - ~.*$
+
+# Silently skip files containing private flags
+file - //\s*@local-only
 ```
+
+---
 
 ### 2. Strict Whitelist Mode
 If you define one or more explicit local file paths using `file + <path/to/file>`, FastGit automatically switches to **Strict Whitelist Mode**. 
