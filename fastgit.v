@@ -90,6 +90,40 @@ fn run_git_cmd(args []string, error_msg string) bool {
 	return true
 }
 
+fn git_add_files(files []string) bool {
+	if files.len == 0 { return true }
+	mut i := 0
+	for i < files.len {
+		mut chunk := ['git', 'add']
+		end := if i + 100 < files.len { i + 100 } else { files.len }
+		for j in i..end {
+			chunk << files[j]
+		}
+		if !run_git_cmd(chunk, 'Failed to add files') {
+			return false
+		}
+		i += 100
+	}
+	return true
+}
+
+fn git_rm_files(files []string) bool {
+	if files.len == 0 { return true }
+	mut i := 0
+	for i < files.len {
+		mut chunk := ['git', 'rm']
+		end := if i + 100 < files.len { i + 100 } else { files.len }
+		for j in i..end {
+			chunk << files[j]
+		}
+		if !run_git_cmd(chunk, 'Failed to remove files') {
+			return false
+		}
+		i += 100
+	}
+	return true
+}
+
 fn delete_git_dir(dir string) {
 	git_dir := os.join_path(dir, '.git')
 	if os.exists(git_dir) {
@@ -705,15 +739,31 @@ fn main() {
 		formatted_url := format_git_url(git_url, token)
 
 		mut created_temp_git := false
+		mut temp_dir := ''
 		defer {
 			if created_temp_git {
-				println('Cleaning up temporary local .git directory...')
-				delete_git_dir(os.getwd())
+				println('Cleaning up temporary local repository...')
+				if temp_dir != '' {
+					os.chdir(original_wd) or {}
+					os.rmdir_all(temp_dir) or {}
+				} else {
+					delete_git_dir(os.getwd())
+				}
 			}
 		}
 
 		if !is_git_repo(os.getwd()) {
-			delete_git_dir(os.getwd())
+			temp_dir = os.join_path(os.temp_dir(), 'fastgit_ctrlz_temp')
+			os.rmdir_all(temp_dir) or {}
+			os.mkdir(temp_dir) or {
+				eprintln('Error: Failed to create temporary directory.')
+				return
+			}
+			os.chdir(temp_dir) or {
+				eprintln('Error: Failed to change to temporary directory.')
+				return
+			}
+
 			println('Initializing temporary local repository for rollback...')
 			if !run_git_cmd(['git', 'init'], 'Failed to initialize repository') { return }
 			if !run_git_cmd(['git', 'symbolic-ref', 'HEAD', 'refs/heads/' + branch], 'Failed to set target branch') { return }
@@ -742,7 +792,7 @@ fn main() {
 
 		if commits.len == 1 {
 			println('The repository has only 1 commit. Resetting repository to an empty state...')
-			if !run_git_cmd(['git', 'checkout', '--orphan', 'temp_orphan'], 'Failed to create orphan branch') { return }
+			if !run_git_cmd(['git', 'checkout', '--force', '--orphan', 'temp_orphan'], 'Failed to create orphan branch') { return }
 			if !run_git_cmd(['git', 'read-tree', '--empty'], 'Failed to clear index') { return }
 			if !run_git_cmd(['git', 'commit', '--allow-empty', '-m', 'Reset repository to empty state'], 'Failed to commit empty state') { return }
 			if !run_git_cmd(['git', 'branch', '-M', 'temp_orphan', branch], 'Failed to rename branch') { return }
@@ -777,15 +827,31 @@ fn main() {
 		formatted_url := format_git_url(git_url, token)
 
 		mut created_temp_git := false
+		mut temp_dir := ''
 		defer {
 			if created_temp_git {
-				println('Cleaning up temporary local .git directory...')
-				delete_git_dir(os.getwd())
+				println('Cleaning up temporary local repository...')
+				if temp_dir != '' {
+					os.chdir(original_wd) or {}
+					os.rmdir_all(temp_dir) or {}
+				} else {
+					delete_git_dir(os.getwd())
+				}
 			}
 		}
 
 		if !is_git_repo(os.getwd()) {
-			delete_git_dir(os.getwd())
+			temp_dir = os.join_path(os.temp_dir(), 'fastgit_remove_temp')
+			os.rmdir_all(temp_dir) or {}
+			os.mkdir(temp_dir) or {
+				eprintln('Error: Failed to create temporary directory.')
+				return
+			}
+			os.chdir(temp_dir) or {
+				eprintln('Error: Failed to change to temporary directory.')
+				return
+			}
+
 			println('Initializing temporary local repository for commit removal...')
 			if !run_git_cmd(['git', 'init'], 'Failed to initialize repository') { return }
 			if !run_git_cmd(['git', 'symbolic-ref', 'HEAD', 'refs/heads/' + branch], 'Failed to set target branch') { return }
@@ -822,14 +888,14 @@ fn main() {
 		if is_root {
 			if commits.len == 1 {
 				println('Commit ${commit_sha} is the only commit in the repository. Resetting repository to an empty state...')
-				if !run_git_cmd(['git', 'checkout', '--orphan', 'temp_orphan'], 'Failed to create orphan branch') { return }
+				if !run_git_cmd(['git', 'checkout', '--force', '--orphan', 'temp_orphan'], 'Failed to create orphan branch') { return }
 				if !run_git_cmd(['git', 'read-tree', '--empty'], 'Failed to clear index') { return }
 				if !run_git_cmd(['git', 'commit', '--allow-empty', '-m', 'Reset repository to empty state'], 'Failed to commit empty state') { return }
 				if !run_git_cmd(['git', 'branch', '-M', 'temp_orphan', branch], 'Failed to rename branch') { return }
 			} else {
 				c2 := commits[1]
 				println('Commit ${commit_sha} is the root commit. Re-writing history to make commit ${c2} the new root commit...')
-				if !run_git_cmd(['git', 'checkout', '--orphan', 'temp_orphan', c2], 'Failed to create orphan branch') { return }
+				if !run_git_cmd(['git', 'checkout', '--force', '--orphan', 'temp_orphan', c2], 'Failed to create orphan branch') { return }
 				if !run_git_cmd(['git', 'commit', '-C', c2], 'Failed to commit new root') { return }
 				
 				if commits.len > 2 {
@@ -919,10 +985,19 @@ fn main() {
 		if !run_git_cmd(['git', 'config', 'user.email', email], 'Failed to config user.email') { return }
 
 		formatted_url := format_git_url(git_url, token)
-		if lazy_push {
-			if !run_git_cmd(['git', 'add', '--ignore-removal', rel_path], 'Failed to add files') { return }
-		} else {
-			if !run_git_cmd(['git', 'add', '-A', rel_path], 'Failed to add files') { return }
+		
+		mut files_to_add := []string{}
+		mut files_to_rm := []string{}
+		for file in changed_files {
+			if os.exists(file) {
+				files_to_add << file
+			} else {
+				files_to_rm << file
+			}
+		}
+		if !git_add_files(files_to_add) { return }
+		if !lazy_push {
+			if !git_rm_files(files_to_rm) { return }
 		}
 		
 		println('Committing changes...')
@@ -1010,8 +1085,20 @@ fn main() {
 
 		if !run_git_cmd(['git', 'config', 'user.name', 'FastGit'], 'Failed to config user.name') { return }
 		if !run_git_cmd(['git', 'config', 'user.email', email], 'Failed to config user.email') { return }
-
-		if !run_git_cmd(['git', 'add', '-A', rel_path], 'Failed to add files') { return }
+		
+		mut files_to_add := []string{}
+		mut files_to_rm := []string{}
+		for file in changed_files {
+			if os.exists(file) {
+				files_to_add << file
+			} else {
+				files_to_rm << file
+			}
+		}
+		if !git_add_files(files_to_add) { return }
+		if !lazy_push {
+			if !git_rm_files(files_to_rm) { return }
+		}
 		
 		println('Committing changes...')
 		if !run_git_cmd(['git', 'commit', '-m', commit_msg], 'Failed to commit') { return }
@@ -1062,10 +1149,19 @@ fn main() {
 		if !run_git_cmd(['git', 'config', 'user.email', email], 'Failed to config user.email') { return }
 
 		formatted_url := format_git_url(git_url, token)
-		if lazy_push {
-			if !run_git_cmd(['git', 'add', '--ignore-removal', rel_path], 'Failed to add files') { return }
-		} else {
-			if !run_git_cmd(['git', 'add', '-A', rel_path], 'Failed to add files') { return }
+		
+		mut files_to_add := []string{}
+		mut files_to_rm := []string{}
+		for file in changed_files {
+			if os.exists(file) {
+				files_to_add << file
+			} else {
+				files_to_rm << file
+			}
+		}
+		if !git_add_files(files_to_add) { return }
+		if !lazy_push {
+			if !git_rm_files(files_to_rm) { return }
 		}
 		
 		println('Amending last commit...')
