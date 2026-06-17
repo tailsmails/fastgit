@@ -12,6 +12,7 @@ struct WhitelistItem {
 struct BlocklistRule {
 	is_filename bool
 	regex       string
+	is_exclude  bool
 }
 
 struct PullRequestPayload {
@@ -524,11 +525,11 @@ fn match_regex(text string, pattern string) bool {
 	return start != -1
 }
 
-fn validate_files(changed_files []string) bool {
+fn validate_and_filter_files(changed_files []string) ?[]string {
 	if !os.exists('fastgit_block') {
-		return true
+		return changed_files
 	}
-	lines := os.read_lines('fastgit_block') or { return true }
+	lines := os.read_lines('fastgit_block') or { return changed_files }
 	mut whitelist := []WhitelistItem{}
 	mut blocklist := []BlocklistRule{}
 	mut current_file_path := ''
@@ -538,7 +539,10 @@ fn validate_files(changed_files []string) bool {
 		if trimmed == '' || trimmed.starts_with('#') { continue }
 		if trimmed.starts_with('filename + ') {
 			pattern := trimmed.all_after('filename + ').trim_space()
-			blocklist << BlocklistRule{ is_filename: true, regex: pattern }
+			blocklist << BlocklistRule{ is_filename: true, regex: pattern, is_exclude: false }
+		} else if trimmed.starts_with('filename - ') {
+			pattern := trimmed.all_after('filename - ').trim_space()
+			blocklist << BlocklistRule{ is_filename: true, regex: pattern, is_exclude: true }
 		} else if trimmed.starts_with('file + ') {
 			pattern := trimmed.all_after('file + ').trim_space()
 			if is_file_path(pattern) {
@@ -554,9 +558,12 @@ fn validate_files(changed_files []string) bool {
 				if current_file_path != '' {
 					current_regexes << pattern
 				} else {
-					blocklist << BlocklistRule{ is_filename: false, regex: pattern }
+					blocklist << BlocklistRule{ is_filename: false, regex: pattern, is_exclude: false }
 				}
 			}
+		} else if trimmed.starts_with('file - ') {
+			pattern := trimmed.all_after('file - ').trim_space()
+			blocklist << BlocklistRule{ is_filename: false, regex: pattern, is_exclude: true }
 		}
 	}
 	if current_file_path != '' {
@@ -565,6 +572,7 @@ fn validate_files(changed_files []string) bool {
 			regexes: current_regexes.clone()
 		}
 	}
+	mut filtered_files := []string{}
 	if whitelist.len > 0 {
 		for file in changed_files {
 			mut allowed := false
@@ -578,35 +586,60 @@ fn validate_files(changed_files []string) bool {
 			}
 			if !allowed {
 				println('Error: File "${file}" is not whitelisted in fastgit_block!')
-				return false
+				return none
 			}
 			content := os.read_file(file) or { '' }
 			for pattern in matched_item.regexes {
 				if match_regex(content, pattern) {
 					println('Error: Blocked pattern "${pattern}" matched in whitelisted file "${file}"!')
-					return false
+					return none
 				}
 			}
+			filtered_files << file
 		}
 	} else {
 		for file in changed_files {
+			mut should_exclude := false
+			mut blocked := false
+			mut block_reason := ''
 			for rule in blocklist {
 				if rule.is_filename {
 					if match_regex(file, rule.regex) {
-						println('Error: Filename "${file}" matches blocked pattern "${rule.regex}"!')
-						return false
+						if rule.is_exclude {
+							should_exclude = true
+							break
+						} else {
+							blocked = true
+							block_reason = 'Filename "${file}" matches blocked pattern "${rule.regex}"!'
+							break
+						}
 					}
 				} else {
 					content := os.read_file(file) or { '' }
 					if match_regex(content, rule.regex) {
-						println('Error: Content in "${file}" matches blocked pattern "${rule.regex}"!')
-						return false
+						if rule.is_exclude {
+							should_exclude = true
+							break
+						} else {
+							blocked = true
+							block_reason = 'Content in "${file}" matches blocked pattern "${rule.regex}"!'
+							break
+						}
 					}
 				}
 			}
+			if blocked {
+				println('Error: ' + block_reason)
+				return none
+			}
+			if !should_exclude {
+				filtered_files << file
+			} else {
+				println('Skipping file: ${file} (matched exclusion rule)')
+			}
 		}
 	}
-	return true
+	return filtered_files
 }
 
 fn confirm_upload(changed_files []string, auto_confirm bool) bool {
@@ -1026,10 +1059,12 @@ fn main() {
 			return
 		}
 
-		if !validate_files(changed_files) {
+		filtered_files := validate_and_filter_files(changed_files) or { return }
+		if filtered_files.len == 0 {
+			println('All changed files were excluded. Nothing to upload.')
 			return
 		}
-		if !confirm_upload(changed_files, auto_confirm) {
+		if !confirm_upload(filtered_files, auto_confirm) {
 			println('Push canceled.')
 			return
 		}
@@ -1068,7 +1103,7 @@ fn main() {
 		
 		mut files_to_add := []string{}
 		mut files_to_rm := []string{}
-		for file in changed_files {
+		for file in filtered_files {
 			if os.exists(file) {
 				files_to_add << file
 			} else {
@@ -1115,10 +1150,12 @@ fn main() {
 			return
 		}
 
-		if !validate_files(changed_files) {
+		filtered_files := validate_and_filter_files(changed_files) or { return }
+		if filtered_files.len == 0 {
+			println('All changed files were excluded. Nothing to upload.')
 			return
 		}
-		if !confirm_upload(changed_files, auto_confirm) {
+		if !confirm_upload(filtered_files, auto_confirm) {
 			println('Push canceled.')
 			return
 		}
@@ -1168,7 +1205,7 @@ fn main() {
 
 		mut files_to_add := []string{}
 		mut files_to_rm := []string{}
-		for file in changed_files {
+		for file in filtered_files {
 			if os.exists(file) {
 				files_to_add << file
 			} else {
@@ -1218,10 +1255,12 @@ fn main() {
 			return
 		}
 
-		if !validate_files(changed_files) {
+		filtered_files := validate_and_filter_files(changed_files) or { return }
+		if filtered_files.len == 0 {
+			println('All changed files were excluded. Nothing to upload.')
 			return
 		}
-		if !confirm_upload(changed_files, auto_confirm) {
+		if !confirm_upload(filtered_files, auto_confirm) {
 			println('Push canceled.')
 			return
 		}
@@ -1244,7 +1283,7 @@ fn main() {
 		
 		mut files_to_add := []string{}
 		mut files_to_rm := []string{}
-		for file in changed_files {
+		for file in filtered_files {
 			if os.exists(file) {
 				files_to_add << file
 			} else {
