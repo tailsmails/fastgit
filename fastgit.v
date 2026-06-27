@@ -112,7 +112,7 @@ fn git_rm_files(files []string) bool {
 	if files.len == 0 { return true }
 	mut i := 0
 	for i < files.len {
-		mut chunk := ['git', 'rm']
+		mut chunk := ['git', 'rm', '-r', '--ignore-unmatch']
 		end := if i + 100 < files.len { i + 100 } else { files.len }
 		for j in i..end {
 			chunk << files[j]
@@ -896,7 +896,7 @@ fn main() {
 			if !run_git_cmd(['git', 'remote', 'add', 'origin', formatted_url], 'Failed to add remote origin') { return }
 
 			println('Fetching last 2 commits from remote...')
-			fetch_res := exec_git_cmd(['git', 'fetch', '--depth', '2', 'origin', branch])
+			fetch_res := exec_git_cmd(['git', 'fetch', '--depth', '2', 'origin', '${branch}:refs/remotes/origin/${branch}'])
 			if fetch_res.exit_code != 0 {
 				eprintln('Error: Failed to fetch history from remote. Maybe the branch is empty.')
 				return
@@ -997,7 +997,7 @@ fn main() {
 			if !run_git_cmd(['git', 'remote', 'add', 'origin', formatted_url], 'Failed to add remote origin') { return }
 
 			println('Fetching full branch history from remote...')
-			fetch_res := exec_git_cmd(['git', 'fetch', 'origin', branch])
+			fetch_res := exec_git_cmd(['git', 'fetch', 'origin', '${branch}:refs/remotes/origin/${branch}'])
 			if fetch_res.exit_code != 0 {
 				eprintln('Error: Failed to fetch history from remote. Maybe the branch is empty.')
 				return
@@ -1125,29 +1125,48 @@ fn main() {
 			}
 		}
 
-		mut created_temp_git := false
-		defer {
-			if created_temp_git {
-				println('Cleaning up temporary local .git directory...')
-				delete_git_dir(repo_dir)
-			}
-		}
+		formatted_url := format_git_url(git_url, token)
 
-		if !is_git_repo(repo_dir) {
+		mut created_temp_git := false
+		mut original_origin_url := ''
+		mut has_origin := false
+
+		if is_git_repo(repo_dir) {
+			res_remote := exec_git_cmd(['git', 'remote', 'get-url', 'origin'])
+			if res_remote.exit_code == 0 {
+				has_origin = true
+				original_origin_url = res_remote.output.trim_space()
+				exec_git_cmd(['git', 'remote', 'set-url', 'origin', formatted_url])
+			} else {
+				exec_git_cmd(['git', 'remote', 'add', 'origin', formatted_url])
+			}
+		} else {
 			delete_git_dir(repo_dir)
 			println('Initializing temporary local repository for commit/push...')
 			if !run_git_cmd(['git', 'init'], 'Failed to initialize repository') { return }
 			if !run_git_cmd(['git', 'branch', '-M', branch], 'Failed to set branch') { return }
+			if !run_git_cmd(['git', 'remote', 'add', 'origin', formatted_url], 'Failed to add remote origin') { return }
 			created_temp_git = true
-		} else if branch_override != '' {
-			if !run_git_cmd(['git', 'checkout', '-B', branch], 'Failed to checkout branch') { return }
+		}
+
+		defer {
+			if created_temp_git {
+				println('Cleaning up temporary local .git directory...')
+				delete_git_dir(repo_dir)
+			} else if is_git_repo(repo_dir) {
+				if has_origin {
+					if original_origin_url != '' {
+						exec_git_cmd(['git', 'remote', 'set-url', 'origin', original_origin_url])
+					}
+				} else {
+					exec_git_cmd(['git', 'remote', 'remove', 'origin'])
+				}
+			}
 		}
 
 		if !run_git_cmd(['git', 'config', 'user.name', name], 'Failed to config user.name') { return }
 		if !run_git_cmd(['git', 'config', 'user.email', email], 'Failed to config user.email') { return }
 
-		formatted_url := format_git_url(git_url, token)
-		
 		mut files_to_add := []string{}
 		mut files_to_rm := []string{}
 		for file in filtered_files {
@@ -1170,8 +1189,11 @@ fn main() {
 			println('No local unstaged changes to commit (already committed). Proceeding with push...')
 		}
 
+		println('Fetching remote history to synchronize lease...')
+		exec_git_cmd(['git', 'fetch', 'origin', '${branch}:refs/remotes/origin/${branch}'])
+
 		println('Overwriting remote history (${force_flag})...')
-		if !run_git_cmd(['git', 'push', formatted_url, branch, force_flag], 'Push failed') { return }
+		if !run_git_cmd(['git', 'push', 'origin', branch, force_flag], 'Push failed') { return }
 		
 		println('Successfully force-pushed changes.')
 		return
@@ -1231,7 +1253,7 @@ fn main() {
 			if !run_git_cmd(['git', 'remote', 'add', 'origin', formatted_url], 'Failed to add remote origin') { return }
 
 			println('Fetching remote branch history...')
-			fetch_res := exec_git_cmd(['git', 'fetch', '--depth', '1', 'origin', branch])
+			fetch_res := exec_git_cmd(['git', 'fetch', '--depth', '1', 'origin', '${branch}:refs/remotes/origin/${branch}'])
 			if fetch_res.exit_code == 0 {
 				if !run_git_cmd(['git', 'reset', 'origin/' + branch], 'Failed to sync with remote history') { return }
 			}
@@ -1242,7 +1264,21 @@ fn main() {
 			}
 			
 			println('Auto-syncing (pulling) with remote repository...')
+			has_changes_to_stash := exec_git_cmd(['git', 'status', '--porcelain']).output.trim_space() != ''
+			mut stashed := false
+			if has_changes_to_stash {
+				stash_res := exec_git_cmd(['git', 'stash', '-u'])
+				if stash_res.exit_code == 0 && !stash_res.output.contains('No local changes to save') {
+					stashed = true
+				}
+			}
+
 			pull_res := exec_git_cmd(['git', 'pull', formatted_url, branch, '--rebase'])
+
+			if stashed {
+				exec_git_cmd(['git', 'stash', 'pop'])
+			}
+
 			if pull_res.exit_code != 0 {
 				println('Error: Auto-sync (pull) failed. This usually happens if there are merge conflicts.')
 				println('Details: ' + pull_res.output.trim_space())
@@ -1275,7 +1311,7 @@ fn main() {
 		if has_staged_changes {
 			if !run_git_cmd(['git', 'commit', '-m', commit_msg], 'Failed to commit') { return }
 		} else {
-			println('No local unstaged changes to commit (already committed locally). Proceeding with push...')
+			println('No local unstaged changes to commit (already committed). Proceeding with push...')
 		}
 
 		println('Pushing to remote...')
