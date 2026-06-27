@@ -1163,7 +1163,12 @@ fn main() {
 		}
 		
 		println('Committing changes...')
-		if !run_git_cmd(['git', 'commit', '-m', commit_msg], 'Failed to commit') { return }
+		has_staged_changes := exec_git_cmd(['git', 'diff', '--cached', '--quiet']).exit_code != 0
+		if has_staged_changes {
+			if !run_git_cmd(['git', 'commit', '-m', commit_msg], 'Failed to commit') { return }
+		} else {
+			println('No local unstaged changes to commit (already committed). Proceeding with push...')
+		}
 
 		println('Overwriting remote history (${force_flag})...')
 		if !run_git_cmd(['git', 'push', formatted_url, branch, force_flag], 'Push failed') { return }
@@ -1266,7 +1271,12 @@ fn main() {
 		}
 		
 		println('Committing changes...')
-		if !run_git_cmd(['git', 'commit', '-m', commit_msg], 'Failed to commit') { return }
+		has_staged_changes := exec_git_cmd(['git', 'diff', '--cached', '--quiet']).exit_code != 0
+		if has_staged_changes {
+			if !run_git_cmd(['git', 'commit', '-m', commit_msg], 'Failed to commit') { return }
+		} else {
+			println('No local unstaged changes to commit (already committed locally). Proceeding with push...')
+		}
 
 		println('Pushing to remote...')
 		if !run_git_cmd(['git', 'push', formatted_url, branch], 'Push failed') { return }
