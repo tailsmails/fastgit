@@ -73,7 +73,7 @@ fn exec_git_cmd(args []string) os.Result {
 		safe_args << 'git'
 		safe_args << '-c'
 		safe_args << 'safe.directory=*'
-		for j in 1..args.len {
+		for j in 1 .. args.len {
 			safe_args << args[j]
 		}
 	} else {
@@ -92,12 +92,14 @@ fn run_git_cmd(args []string, error_msg string) bool {
 }
 
 fn git_add_files(files []string) bool {
-	if files.len == 0 { return true }
+	if files.len == 0 {
+		return true
+	}
 	mut i := 0
 	for i < files.len {
 		mut chunk := ['git', 'add']
 		end := if i + 100 < files.len { i + 100 } else { files.len }
-		for j in i..end {
+		for j in i .. end {
 			chunk << files[j]
 		}
 		if !run_git_cmd(chunk, 'Failed to add files') {
@@ -109,12 +111,14 @@ fn git_add_files(files []string) bool {
 }
 
 fn git_rm_files(files []string) bool {
-	if files.len == 0 { return true }
+	if files.len == 0 {
+		return true
+	}
 	mut i := 0
 	for i < files.len {
 		mut chunk := ['git', 'rm', '-r', '--ignore-unmatch']
 		end := if i + 100 < files.len { i + 100 } else { files.len }
-		for j in i..end {
+		for j in i .. end {
 			chunk << files[j]
 		}
 		if !run_git_cmd(chunk, 'Failed to remove files') {
@@ -220,7 +224,7 @@ fn parse_github_owner_repo(url string) (string, string) {
 	if clean_url.ends_with('.git') {
 		clean_url = clean_url[0 .. clean_url.len - 4]
 	}
-	
+
 	if !clean_url.contains('github.com') {
 		return "", ""
 	}
@@ -288,7 +292,7 @@ fn setup_request_proxy(mut req http.Request) {
 
 fn get_gitless_changed_files(repo_dir string, rel_path string, git_url string, token string, branch string, lazy_push bool) []string {
 	owner, repo := parse_github_owner_repo(git_url)
-	
+
 	if owner == '' || repo == '' {
 		println('Warning: Smart remote comparison is only supported for GitHub. Treating all local files as new/modified.')
 		
@@ -393,7 +397,7 @@ fn create_pull_request(git_url string, token string, title string, base string) 
 		return
 	}
 	api_url := 'https://api.github.com/repos/${owner}/${repo}/pulls'
-	
+
 	payload := PullRequestPayload{
 		title: title
 		head: head
@@ -412,7 +416,7 @@ fn create_pull_request(git_url string, token string, title string, base string) 
 		return
 	}
 	output := res.body.trim_space()
-	
+
 	response := json.decode(GitHubPullRequestResponse, output) or {
 		println('Failed to parse API Response. Raw response:')
 		println(output)
@@ -446,7 +450,7 @@ fn fork_repository(git_url string, token string) {
 		return
 	}
 	output := res.body.trim_space()
-	
+
 	response := json.decode(GitHubForkResponse, output) or {
 		println('Failed to parse API Response. Raw response:')
 		println(output)
@@ -470,7 +474,7 @@ fn sync_fork_with_upstream(git_url string, token string, branch string) {
 	}
 	println('Syncing fork ${owner}/${repo} (branch: "${branch}") with upstream...')
 	api_url := 'https://api.github.com/repos/${owner}/${repo}/merge-upstream'
-	
+
 	payload := SyncPayload{
 		branch: branch
 	}
@@ -486,7 +490,7 @@ fn sync_fork_with_upstream(git_url string, token string, branch string) {
 		return
 	}
 	output := res.body.trim_space()
-	
+
 	response := json.decode(GitHubSyncResponse, output) or {
 		if output.contains('conflict') {
 			println('Error: Could not automatically sync fork due to merge conflicts. Please resolve manually.')
@@ -510,7 +514,7 @@ fn sync_fork_with_upstream(git_url string, token string, branch string) {
 
 fn format_git_url(raw_url string, token string) string {
 	mut url := raw_url.trim_space()
-	
+
 	if url.starts_with('git@') {
 		content := url.all_after('git@')
 		parts := content.split(':')
@@ -569,9 +573,12 @@ fn validate_and_filter_files(changed_files []string) ?[]string {
 	mut blocklist := []BlocklistRule{}
 	mut current_file_path := ''
 	mut current_regexes := []string{}
+	
 	for line in lines {
 		trimmed := line.trim_space()
-		if trimmed == '' || trimmed.starts_with('#') { continue }
+		if trimmed == '' || trimmed.starts_with('#') {
+			continue
+		}
 		if trimmed.starts_with('filename + ') {
 			pattern := trimmed.all_after('filename + ').trim_space()
 			blocklist << BlocklistRule{ is_filename: true, regex: pattern, is_exclude: false }
@@ -582,10 +589,7 @@ fn validate_and_filter_files(changed_files []string) ?[]string {
 			pattern := trimmed.all_after('file + ').trim_space()
 			if is_file_path(pattern) {
 				if current_file_path != '' {
-					whitelist << WhitelistItem{
-						file_path: current_file_path
-						regexes: current_regexes.clone()
-					}
+					whitelist << WhitelistItem{ file_path: current_file_path, regexes: current_regexes.clone() }
 				}
 				current_file_path = pattern
 				current_regexes = []string{}
@@ -602,10 +606,7 @@ fn validate_and_filter_files(changed_files []string) ?[]string {
 		}
 	}
 	if current_file_path != '' {
-		whitelist << WhitelistItem{
-			file_path: current_file_path
-			regexes: current_regexes.clone()
-		}
+		whitelist << WhitelistItem{ file_path: current_file_path, regexes: current_regexes.clone() }
 	}
 	mut filtered_files := []string{}
 	if whitelist.len > 0 {
@@ -683,7 +684,7 @@ fn confirm_upload(changed_files []string, auto_confirm bool) bool {
 	}
 	println('The following files are staged/changed for upload:')
 	for file in changed_files {
-		println('  -> ${file}')
+		println(' -> ${file}')
 	}
 	ans := os.input('Do you want to proceed with the push? (y/n): ').trim_space().to_lower()
 	return ans == 'y' || ans == 'yes'
@@ -692,22 +693,22 @@ fn confirm_upload(changed_files []string, auto_confirm bool) bool {
 fn print_usage() {
 	println('FastGit - A smart and anonymous tool for working with GitHub')
 	println('Usage:')
-	println('  ./fastgit <git_url> <commit_message> <file_or_folder_path>')
-	println('  ./fastgit <git_url> <file_or_folder_path>')
-	println('  ./fastgit over <git_url> <commit_message> <file_or_folder_path>')
-	println('  ./fastgit ctrlz <git_url>')
-	println('  ./fastgit remove <git_url> <commit_sha>')
-	println('  ./fastgit pr <git_url> <title> [base_branch]')
-	println('  ./fastgit fork <git_url>')
-	println('  ./fastgit sync <git_url> [branch_name]')
+	println(' ./fastgit <git_url> <commit_message> <file_or_folder_path>')
+	println(' ./fastgit <git_url> <file_or_folder_path>')
+	println(' ./fastgit over <git_url> <commit_message> <file_or_folder_path>')
+	println(' ./fastgit ctrlz <git_url>')
+	println(' ./fastgit remove <git_url> <commit_sha>')
+	println(' ./fastgit pr <git_url>  [base_branch]')
+	println(' ./fastgit fork <git_url>')
+	println(' ./fastgit sync <git_url> [branch_name]')
 	println('\nOptions:')
-	println('  -e, --email <email>    GitHub anonymous email (Anonymous / No-Reply)')
-	println('  -n, --name <name>      Git author name')
-	println('  -t, --token <token>    GitHub Personal Access Token')
-	println('  -y, --yes              Skip upload confirmation')
-	println('  -b, --branch <branch>  Target branch (default: current branch or main)')
-	println('  -l, --lazy             Lazy push (do not delete remote files that are missing locally)')
-	println('  -f, --force            Use absolute force push (bypasses safety and overrides default --force-with-lease)')
+	println(' -e, --email  GitHub anonymous email (Anonymous / No-Reply)')
+	println(' -n, --name  Git author name')
+	println(' -t, --token  GitHub Personal Access Token')
+	println(' -y, --yes Skip upload confirmation')
+	println(' -b, --branch  Target branch (default: current branch or main)')
+	println(' -l, --lazy Lazy push (do not delete remote files that are missing locally)')
+	println(' -f, --force Use absolute force push (bypasses safety and overrides default --force-with-lease)')
 	println('\nNote: You can also set FASTGIT_EMAIL, FASTGIT_NAME and FASTGIT_TOKEN environment variables.')
 }
 
@@ -728,6 +729,7 @@ fn main() {
 	mut auto_confirm := os.getenv('FASTGIT_AUTO_CONFIRM') == 'true'
 	mut lazy_push := false
 	mut use_absolute_force := false
+	
 	mut i := 0
 	for i < os.args.len {
 		arg := os.args[i]
@@ -773,6 +775,7 @@ fn main() {
 			i++
 		}
 	}
+	
 	if positional_args.len < 2 {
 		print_usage()
 		return
@@ -789,7 +792,7 @@ fn main() {
 		}
 	}
 	original_wd := os.getwd()
-	
+
 	force_flag := if use_absolute_force { '--force' } else { '--force-with-lease' }
 
 	if positional_args[1] == 'fork' {
@@ -801,6 +804,7 @@ fn main() {
 		fork_repository(git_url, token)
 		return
 	}
+	
 	if positional_args[1] == 'sync' {
 		if positional_args.len < 3 {
 			print_usage()
@@ -827,6 +831,7 @@ fn main() {
 		}
 		return
 	}
+	
 	if positional_args[1] == 'pr' {
 		if positional_args.len < 4 {
 			print_usage()
@@ -845,6 +850,7 @@ fn main() {
 		create_pull_request(git_url, token, title, base_branch)
 		return
 	}
+	
 	if positional_args[1] == 'ctrlz' {
 		if positional_args.len < 3 {
 			print_usage()
@@ -929,14 +935,14 @@ fn main() {
 		}
 
 		if commits.len == 1 {
-			println('The repository has only 1 commit. Resetting repository to an empty state...')
-			if !run_git_cmd(['git', 'checkout', '--force', '--orphan', 'temp_orphan'], 'Failed to create orphan branch') { return }
-			if !run_git_cmd(['git', 'read-tree', '--empty'], 'Failed to clear index') { return }
+			println('The repository has only 1 commit. Resetting repository to an empty state (keeping your files)...')
+			if !run_git_cmd(['git', 'checkout', '--orphan', 'temp_orphan'], 'Failed to create orphan branch') { return }
+			exec_git_cmd(['git', 'rm', '-rf', '--cached', '.'])
 			if !run_git_cmd(['git', 'commit', '--allow-empty', '-m', 'Reset repository to empty state'], 'Failed to commit empty state') { return }
 			if !run_git_cmd(['git', 'branch', '-M', 'temp_orphan', branch], 'Failed to rename branch') { return }
 		} else {
-			println('Rolling back the last commit locally...')
-			if !run_git_cmd(['git', 'reset', '--hard', 'HEAD~1'], 'Failed to reset commit locally.') { return }
+			println('Rolling back the last commit locally (keeping your files)...')
+			if !run_git_cmd(['git', 'reset', 'HEAD~1'], 'Failed to reset commit locally.') { return }
 		}
 		
 		println('Pushing roll-back to remote (${force_flag})...')
@@ -945,6 +951,7 @@ fn main() {
 		println('Successfully removed the last commit from local and remote.')
 		return
 	}
+	
 	if positional_args[1] == 'remove' {
 		if positional_args.len < 4 {
 			print_usage()
@@ -1037,15 +1044,15 @@ fn main() {
 
 		if is_root {
 			if commits.len == 1 {
-				println('Commit ${commit_sha} is the only commit in the repository. Resetting repository to an empty state...')
-				if !run_git_cmd(['git', 'checkout', '--force', '--orphan', 'temp_orphan'], 'Failed to create orphan branch') { return }
-				if !run_git_cmd(['git', 'read-tree', '--empty'], 'Failed to clear index') { return }
+				println('Commit ${commit_sha} is the only commit in the repository. Resetting repository to an empty state (keeping your files)...')
+				if !run_git_cmd(['git', 'checkout', '--orphan', 'temp_orphan'], 'Failed to create orphan branch') { return }
+				exec_git_cmd(['git', 'rm', '-rf', '--cached', '.'])
 				if !run_git_cmd(['git', 'commit', '--allow-empty', '-m', 'Reset repository to empty state'], 'Failed to commit empty state') { return }
 				if !run_git_cmd(['git', 'branch', '-M', 'temp_orphan', branch], 'Failed to rename branch') { return }
 			} else {
 				c2 := commits[1]
 				println('Commit ${commit_sha} is the root commit. Re-writing history to make commit ${c2} the new root commit...')
-				if !run_git_cmd(['git', 'checkout', '--force', '--orphan', 'temp_orphan', c2], 'Failed to create orphan branch') { return }
+				if !run_git_cmd(['git', 'checkout', '--orphan', 'temp_orphan', c2], 'Failed to create orphan branch') { return }
 				if !run_git_cmd(['git', 'commit', '-C', c2], 'Failed to commit new root') { return }
 				
 				if commits.len > 2 {
@@ -1075,6 +1082,7 @@ fn main() {
 		println('Successfully removed commit ${commit_sha} from remote.')
 		return
 	}
+	
 	if positional_args[1] == 'over' {
 		if positional_args.len < 5 {
 			print_usage()
@@ -1198,6 +1206,7 @@ fn main() {
 		println('Successfully force-pushed changes.')
 		return
 	}
+	
 	if positional_args.len == 4 {
 		git_url := positional_args[1]
 		commit_msg := positional_args[2]
@@ -1263,29 +1272,40 @@ fn main() {
 				if !run_git_cmd(['git', 'checkout', '-B', branch], 'Failed to checkout branch') { return }
 			}
 			
-			println('Auto-syncing (pulling) with remote repository...')
-			has_changes_to_stash := exec_git_cmd(['git', 'status', '--porcelain']).output.trim_space() != ''
-			mut stashed := false
-			if has_changes_to_stash {
-				stash_res := exec_git_cmd(['git', 'stash', '-u'])
-				if stash_res.exit_code == 0 && !stash_res.output.contains('No local changes to save') {
-					stashed = true
+			println('Checking if remote branch exists...')
+			ls_res := exec_git_cmd(['git', 'ls-remote', '--heads', formatted_url, branch])
+			mut remote_exists := false
+			if ls_res.exit_code == 0 && ls_res.output.trim_space() != '' {
+				remote_exists = true
+			}
+
+			if remote_exists {
+				println('Auto-syncing (pulling) with remote repository...')
+				has_changes_to_stash := exec_git_cmd(['git', 'status', '--porcelain']).output.trim_space() != ''
+				mut stashed := false
+				if has_changes_to_stash {
+					stash_res := exec_git_cmd(['git', 'stash', '-u'])
+					if stash_res.exit_code == 0 && !stash_res.output.contains('No local changes to save') {
+						stashed = true
+					}
 				}
-			}
 
-			pull_res := exec_git_cmd(['git', 'pull', formatted_url, branch, '--rebase'])
+				pull_res := exec_git_cmd(['git', 'pull', formatted_url, branch, '--rebase'])
 
-			if stashed {
-				exec_git_cmd(['git', 'stash', 'pop'])
-			}
+				if stashed {
+					exec_git_cmd(['git', 'stash', 'pop'])
+				}
 
-			if pull_res.exit_code != 0 {
-				println('Error: Auto-sync (pull) failed. This usually happens if there are merge conflicts.')
-				println('Details: ' + pull_res.output.trim_space())
-				println('Aborting sync...')
-				exec_git_cmd(['git', 'rebase', '--abort'])
-				println('Sync aborted. Please pull manually or use the "over" command to overwrite remote history.')
-				return
+				if pull_res.exit_code != 0 {
+					println('Error: Auto-sync (pull) failed. This usually happens if there are merge conflicts.')
+					println('Details: ' + pull_res.output.trim_space())
+					println('Aborting sync...')
+					exec_git_cmd(['git', 'rebase', '--abort'])
+					println('Sync aborted. Please pull manually or use the "over" command to overwrite remote history.')
+					return
+				}
+			} else {
+				println('Remote branch "${branch}" not found (likely empty repository). Skipping pull.')
 			}
 		}
 
@@ -1320,6 +1340,7 @@ fn main() {
 		println('Successfully pushed changes.')
 		return
 	}
+	
 	if positional_args.len == 3 {
 		git_url := positional_args[1]
 		file_path := positional_args[2]
