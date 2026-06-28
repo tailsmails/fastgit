@@ -67,6 +67,36 @@ fn is_git_repo(dir string) bool {
 	return os.is_dir(os.join_path(os.real_path(dir), '.git'))
 }
 
+fn is_correct_git_repo(dir string, target_url string) bool {
+	if !is_git_repo(dir) {
+		return false
+	}
+	res := exec_git_cmd(['git', '-C', dir, 'remote', 'get-url', 'origin'])
+	if res.exit_code != 0 {
+		return false
+	}
+	mut local_url := res.output.trim_space()
+	
+	o1, r1 := parse_github_owner_repo(local_url)
+	o2, r2 := parse_github_owner_repo(target_url)
+	if o1 != '' && o1 == o2 && r1 != '' && r1 == r2 {
+		return true
+	}
+	
+	mut clean_local := local_url.replace('.git', '')
+	mut clean_target := target_url.replace('.git', '')
+	if clean_local.contains('@') { clean_local = clean_local.all_after('@') }
+	else if clean_local.contains('://') { clean_local = clean_local.all_after('://') }
+	if clean_target.contains('@') { clean_target = clean_target.all_after('@') }
+	else if clean_target.contains('://') { clean_target = clean_target.all_after('://') }
+	
+	if clean_local != '' && clean_local == clean_target {
+		return true
+	}
+	
+	return false
+}
+
 fn exec_git_cmd(args []string) os.Result {
 	mut safe_args := []string{}
 	if args.len > 0 && args[0] == 'git' {
@@ -97,7 +127,7 @@ fn git_add_files(files []string) bool {
 	}
 	mut i := 0
 	for i < files.len {
-		mut chunk := ['git', 'add']
+		mut chunk := ['git', 'add', '--force']
 		end := if i + 100 < files.len { i + 100 } else { files.len }
 		for j in i .. end {
 			chunk << files[j]
@@ -290,6 +320,59 @@ fn setup_request_proxy(mut req http.Request) {
 	}
 }
 
+fn push_to_remote(formatted_url string, branch string, force_flag string, sync_lease bool) bool {
+	mut original_url := ''
+	mut has_origin := false
+	res_remote := exec_git_cmd(['git', 'remote', 'get-url', 'origin'])
+	if res_remote.exit_code == 0 {
+		has_origin = true
+		original_url = res_remote.output.trim_space()
+		exec_git_cmd(['git', 'remote', 'set-url', 'origin', formatted_url])
+	} else {
+		exec_git_cmd(['git', 'remote', 'add', 'origin', formatted_url])
+	}
+
+	if sync_lease {
+		println('Synchronizing lease with remote...')
+		exec_git_cmd(['git', 'fetch', 'origin', '${branch}:refs/remotes/origin/${branch}'])
+	}
+
+	mut push_args := ['git', 'push', 'origin', branch]
+	if force_flag != '' {
+		push_args << force_flag
+	}
+	
+	mut res := exec_git_cmd(push_args)
+	if res.exit_code != 0 {
+		err_out := res.output.trim_space()
+		if (force_flag != '' && (err_out.contains('stale info') || err_out.contains('fetch first'))) || err_out.contains('non-fast-forward') {
+			if force_flag != '--force' && force_flag != '' {
+				println('Warning: Push rejected by GitHub due to divergent history. Retrying with absolute force (--force)...')
+				mut fallback_args := ['git', 'push', 'origin', branch, '--force']
+				res = exec_git_cmd(fallback_args)
+				if res.exit_code != 0 {
+					eprintln('Error: Failed to update remote even with --force. Output:\n${res.output.trim_space()}')
+				} else {
+					println('Force push successful on fallback.')
+				}
+			} else {
+				eprintln('Error: Failed to update remote. Output:\n${err_out}')
+			}
+		} else {
+			eprintln('Error: Failed to update remote. Output:\n${err_out}')
+		}
+	}
+
+	if has_origin {
+		if original_url != '' {
+			exec_git_cmd(['git', 'remote', 'set-url', 'origin', original_url])
+		}
+	} else {
+		exec_git_cmd(['git', 'remote', 'remove', 'origin'])
+	}
+	return res.exit_code == 0
+}
+
 fn get_gitless_changed_files(repo_dir string, rel_path string, git_url string, token string, branch string, lazy_push bool) []string {
 	owner, repo := parse_github_owner_repo(git_url)
 
@@ -341,7 +424,7 @@ fn get_gitless_changed_files(repo_dir string, rel_path string, git_url string, t
 			}
 		}
 	} else {
-		println('Remote repository/branch empty or not found (Status: ${res.status_code}). Treating all local files as new.')
+		println('Remote repository empty or branch not found. Treating all local files as new.')
 	}
 
 	mut changed_files := []string{}
@@ -870,21 +953,22 @@ fn main() {
 
 		formatted_url := format_git_url(git_url, token)
 
-		mut created_temp_git := false
+		mut use_temp_repo := false
+		if !is_correct_git_repo(os.getwd(), git_url) {
+			use_temp_repo = true
+			println('Note: Current directory is not the exact repository for this URL. Using a temporary clone for safety.')
+		}
+
 		mut temp_dir := ''
 		defer {
-			if created_temp_git {
+			if use_temp_repo && temp_dir != '' {
 				println('Cleaning up temporary local repository...')
-				if temp_dir != '' {
-					os.chdir(original_wd) or {}
-					os.rmdir_all(temp_dir) or {}
-				} else {
-					delete_git_dir(os.getwd())
-				}
+				os.chdir(original_wd) or {}
+				os.rmdir_all(temp_dir) or {}
 			}
 		}
 
-		if !is_git_repo(os.getwd()) {
+		if use_temp_repo {
 			temp_dir = os.join_path(os.temp_dir(), 'fastgit_ctrlz_temp')
 			os.rmdir_all(temp_dir) or {}
 			os.mkdir(temp_dir) or {
@@ -908,9 +992,12 @@ fn main() {
 				return
 			}
 			if !run_git_cmd(['git', 'reset', '--hard', 'origin/' + branch], 'Failed to sync with remote history') { return }
-			created_temp_git = true
-		} else if branch_override != '' {
-			if !run_git_cmd(['git', 'checkout', '-B', branch], 'Failed to checkout branch') { return }
+		} else {
+			if branch_override != '' {
+				if !run_git_cmd(['git', 'checkout', '-B', branch], 'Failed to checkout branch') { return }
+			}
+			println('Updating remote lease before rollback...')
+			exec_git_cmd(['git', 'fetch', 'origin', '${branch}:refs/remotes/origin/${branch}'])
 		}
 
 		if !run_git_cmd(['git', 'config', 'user.name', name], 'Failed to config user.name') { return }
@@ -946,7 +1033,7 @@ fn main() {
 		}
 		
 		println('Pushing roll-back to remote (${force_flag})...')
-		if !run_git_cmd(['git', 'push', formatted_url, branch, force_flag], 'Failed to update remote') { return }
+		if !push_to_remote(formatted_url, branch, force_flag, false) { return }
 		
 		println('Successfully removed the last commit from local and remote.')
 		return
@@ -972,21 +1059,22 @@ fn main() {
 
 		formatted_url := format_git_url(git_url, token)
 
-		mut created_temp_git := false
+		mut use_temp_repo := false
+		if !is_correct_git_repo(os.getwd(), git_url) {
+			use_temp_repo = true
+			println('Note: Current directory is not the exact repository for this URL. Using a temporary clone for safety.')
+		}
+
 		mut temp_dir := ''
 		defer {
-			if created_temp_git {
+			if use_temp_repo && temp_dir != '' {
 				println('Cleaning up temporary local repository...')
-				if temp_dir != '' {
-					os.chdir(original_wd) or {}
-					os.rmdir_all(temp_dir) or {}
-				} else {
-					delete_git_dir(os.getwd())
-				}
+				os.chdir(original_wd) or {}
+				os.rmdir_all(temp_dir) or {}
 			}
 		}
 
-		if !is_git_repo(os.getwd()) {
+		if use_temp_repo {
 			temp_dir = os.join_path(os.temp_dir(), 'fastgit_remove_temp')
 			os.rmdir_all(temp_dir) or {}
 			os.mkdir(temp_dir) or {
@@ -1010,9 +1098,12 @@ fn main() {
 				return
 			}
 			if !run_git_cmd(['git', 'reset', '--hard', 'origin/' + branch], 'Failed to sync with remote history') { return }
-			created_temp_git = true
-		} else if branch_override != '' {
-			if !run_git_cmd(['git', 'checkout', '-B', branch], 'Failed to checkout branch') { return }
+		} else {
+			if branch_override != '' {
+				if !run_git_cmd(['git', 'checkout', '-B', branch], 'Failed to checkout branch') { return }
+			}
+			println('Updating remote lease before commit removal...')
+			exec_git_cmd(['git', 'fetch', 'origin', '${branch}:refs/remotes/origin/${branch}'])
 		}
 
 		if !run_git_cmd(['git', 'config', 'user.name', name], 'Failed to config user.name') { return }
@@ -1077,7 +1168,7 @@ fn main() {
 		}
 
 		println('Pushing updated history to remote (${force_flag})...')
-		if !run_git_cmd(['git', 'push', formatted_url, branch, force_flag], 'Failed to update remote') { return }
+		if !push_to_remote(formatted_url, branch, force_flag, false) { return }
 
 		println('Successfully removed commit ${commit_sha} from remote.')
 		return
@@ -1109,19 +1200,19 @@ fn main() {
 		}
 
 		changed_files := get_gitless_changed_files(repo_dir, rel_path, git_url, token, branch, lazy_push)
-		if changed_files.len == 0 {
-			println('No changed or untracked files detected for "${rel_path}" compared to remote branch "${branch}".')
-			return
+		
+		mut filtered_files := []string{}
+		if changed_files.len > 0 {
+			filtered_files = validate_and_filter_files(changed_files) or { return }
 		}
 
-		filtered_files := validate_and_filter_files(changed_files) or { return }
 		if filtered_files.len == 0 {
-			println('All changed files were excluded. Nothing to upload.')
-			return
-		}
-		if !confirm_upload(filtered_files, auto_confirm) {
-			println('Push canceled.')
-			return
+			println('No file changes detected compared to remote. Proceeding with history overwrite (force push) anyway...')
+		} else {
+			if !confirm_upload(filtered_files, auto_confirm) {
+				println('Push canceled.')
+				return
+			}
 		}
 
 		println('\nWarning: The "over" command will completely overwrite the remote history on branch "${branch}".')
@@ -1136,39 +1227,22 @@ fn main() {
 		formatted_url := format_git_url(git_url, token)
 
 		mut created_temp_git := false
-		mut original_origin_url := ''
-		mut has_origin := false
-
-		if is_git_repo(repo_dir) {
-			res_remote := exec_git_cmd(['git', 'remote', 'get-url', 'origin'])
-			if res_remote.exit_code == 0 {
-				has_origin = true
-				original_origin_url = res_remote.output.trim_space()
-				exec_git_cmd(['git', 'remote', 'set-url', 'origin', formatted_url])
-			} else {
-				exec_git_cmd(['git', 'remote', 'add', 'origin', formatted_url])
-			}
-		} else {
+		if !is_git_repo(repo_dir) {
 			delete_git_dir(repo_dir)
 			println('Initializing temporary local repository for commit/push...')
 			if !run_git_cmd(['git', 'init'], 'Failed to initialize repository') { return }
-			if !run_git_cmd(['git', 'branch', '-M', branch], 'Failed to set branch') { return }
-			if !run_git_cmd(['git', 'remote', 'add', 'origin', formatted_url], 'Failed to add remote origin') { return }
+			if !run_git_cmd(['git', 'checkout', '-b', branch], 'Failed to set branch') { return }
 			created_temp_git = true
+		} else {
+			if branch_override != '' {
+				if !run_git_cmd(['git', 'checkout', '-B', branch], 'Failed to checkout branch') { return }
+			}
 		}
 
 		defer {
 			if created_temp_git {
 				println('Cleaning up temporary local .git directory...')
 				delete_git_dir(repo_dir)
-			} else if is_git_repo(repo_dir) {
-				if has_origin {
-					if original_origin_url != '' {
-						exec_git_cmd(['git', 'remote', 'set-url', 'origin', original_origin_url])
-					}
-				} else {
-					exec_git_cmd(['git', 'remote', 'remove', 'origin'])
-				}
 			}
 		}
 
@@ -1184,24 +1258,26 @@ fn main() {
 				files_to_rm << file
 			}
 		}
-		if !git_add_files(files_to_add) { return }
-		if !lazy_push {
-			if !git_rm_files(files_to_rm) { return }
-		}
+		if files_to_add.len > 0 { git_add_files(files_to_add) }
+		if !lazy_push && files_to_rm.len > 0 { git_rm_files(files_to_rm) }
 		
 		println('Committing changes...')
 		has_staged_changes := exec_git_cmd(['git', 'diff', '--cached', '--quiet']).exit_code != 0
-		if has_staged_changes {
-			if !run_git_cmd(['git', 'commit', '-m', commit_msg], 'Failed to commit') { return }
+		
+		commits := get_commit_list(branch)
+		if commits.len > 0 {
+			println('Overwriting the previous commit (Amending)...')
+			if !run_git_cmd(['git', 'commit', '--amend', '-m', commit_msg], 'Failed to amend commit') { return }
 		} else {
-			println('No local unstaged changes to commit (already committed). Proceeding with push...')
+			if has_staged_changes {
+				if !run_git_cmd(['git', 'commit', '-m', commit_msg], 'Failed to commit') { return }
+			} else {
+				println('No local unstaged changes to commit. Proceeding with force push...')
+			}
 		}
 
-		println('Fetching remote history to synchronize lease...')
-		exec_git_cmd(['git', 'fetch', 'origin', '${branch}:refs/remotes/origin/${branch}'])
-
 		println('Overwriting remote history (${force_flag})...')
-		if !run_git_cmd(['git', 'push', 'origin', branch, force_flag], 'Push failed') { return }
+		if !push_to_remote(formatted_url, branch, force_flag, true) { return }
 		
 		println('Successfully force-pushed changes.')
 		return
@@ -1229,16 +1305,17 @@ fn main() {
 		}
 
 		changed_files := get_gitless_changed_files(repo_dir, rel_path, git_url, token, branch, lazy_push)
-		if changed_files.len == 0 {
-			println('No changed or untracked files detected for "${rel_path}" compared to remote branch "${branch}".')
+		
+		mut filtered_files := []string{}
+		if changed_files.len > 0 {
+			filtered_files = validate_and_filter_files(changed_files) or { return }
+		}
+
+		if filtered_files.len == 0 {
+			println('All changed files were excluded or no changes detected. Nothing to upload.')
 			return
 		}
 
-		filtered_files := validate_and_filter_files(changed_files) or { return }
-		if filtered_files.len == 0 {
-			println('All changed files were excluded. Nothing to upload.')
-			return
-		}
 		if !confirm_upload(filtered_files, auto_confirm) {
 			println('Push canceled.')
 			return
@@ -1321,21 +1398,19 @@ fn main() {
 				files_to_rm << file
 			}
 		}
-		if !git_add_files(files_to_add) { return }
-		if !lazy_push {
-			if !git_rm_files(files_to_rm) { return }
-		}
+		if files_to_add.len > 0 { git_add_files(files_to_add) }
+		if !lazy_push && files_to_rm.len > 0 { git_rm_files(files_to_rm) }
 		
 		println('Committing changes...')
 		has_staged_changes := exec_git_cmd(['git', 'diff', '--cached', '--quiet']).exit_code != 0
 		if has_staged_changes {
 			if !run_git_cmd(['git', 'commit', '-m', commit_msg], 'Failed to commit') { return }
 		} else {
-			println('No local unstaged changes to commit (already committed). Proceeding with push...')
+			println('No local unstaged changes to commit. Proceeding with push...')
 		}
 
 		println('Pushing to remote...')
-		if !run_git_cmd(['git', 'push', formatted_url, branch], 'Push failed') { return }
+		if !push_to_remote(formatted_url, branch, '', false) { return }
 		
 		println('Successfully pushed changes.')
 		return
@@ -1366,19 +1441,19 @@ fn main() {
 		}
 
 		changed_files := get_gitless_changed_files(repo_dir, rel_path, git_url, token, branch, lazy_push)
-		if changed_files.len == 0 {
-			println('No changed or untracked files detected for "${rel_path}" compared to remote branch "${branch}".')
-			return
+		
+		mut filtered_files := []string{}
+		if changed_files.len > 0 {
+			filtered_files = validate_and_filter_files(changed_files) or { return }
 		}
 
-		filtered_files := validate_and_filter_files(changed_files) or { return }
 		if filtered_files.len == 0 {
-			println('All changed files were excluded. Nothing to upload.')
-			return
-		}
-		if !confirm_upload(filtered_files, auto_confirm) {
-			println('Push canceled.')
-			return
+			println('No file changes detected compared to remote. Proceeding with amending history anyway...')
+		} else {
+			if !confirm_upload(filtered_files, auto_confirm) {
+				println('Push canceled.')
+				return
+			}
 		}
 
 		commit_info := get_commit_info('HEAD')
@@ -1406,16 +1481,14 @@ fn main() {
 				files_to_rm << file
 			}
 		}
-		if !git_add_files(files_to_add) { return }
-		if !lazy_push {
-			if !git_rm_files(files_to_rm) { return }
-		}
+		if files_to_add.len > 0 { git_add_files(files_to_add) }
+		if !lazy_push && files_to_rm.len > 0 { git_rm_files(files_to_rm) }
 		
 		println('Amending last commit...')
 		if !run_git_cmd(['git', 'commit', '--amend', '--no-edit'], 'Failed to amend commit') { return }
 
 		println('Force pushing updated commit to remote (${force_flag})...')
-		if !run_git_cmd(['git', 'push', formatted_url, branch, force_flag], 'Push failed') { return }
+		if !push_to_remote(formatted_url, branch, force_flag, true) { return }
 		
 		println('Successfully amended last commit and force pushed.')
 		return
