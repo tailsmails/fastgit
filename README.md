@@ -94,7 +94,7 @@ pkg update -y && pkg install -y git clang make && if ! command -v v >/dev/null 2
 
 ## Safety & Content Shield (`fastgit_block`)
 
-FastGit actively scans your staged/changed files **before** any Git transaction takes place using a local rules file named `fastgit_block`. If any block rules are violated, the push is aborted instantly [3]. If ignore rules are matched, those files are filtered out of the push transaction quietly.
+FastGit actively scans your staged/changed files **before** any Git transaction takes place using a local rules file named `fastgit_block`. If any block rules are violated, the push is aborted instantly. If ignore rules are matched, those files are filtered out of the push transaction quietly.
 
 The validation file supports three distinct modes depending on how you structure it:
 
