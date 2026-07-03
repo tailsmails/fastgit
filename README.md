@@ -28,6 +28,14 @@ By utilizing remote-tree comparison and temporary directory structures, FastGit 
 - **Identity Override**: Rewrites the temporary repository's `user.name` and `user.email` dynamically before making commits.
 - **Delta Control (`--lazy`)**: Pushing with `-lazy` or `--lazy` triggers `git add --ignore-removal`, preserving remote files that are not present in your local directory.
 
+### 5. Anti-Scraper Defensive Traps (`bomb`)
+- **Polymorphic JSON Tarpit**: Generates highly nested JSON structures using contextual keywords to bypass basic recursion filters and trigger parser crashes.
+- **Stealth PEM RegEx Tarpit**: Creates valid-looking Private Key certificates with extreme continuous character streams, causing Catastrophic Backtracking in scraper regular expression engines.
+- **Billion Laughs XML Expansion**: Leverages nested XML entities to consume CPU and RAM resources when evaluated by target parser architectures.
+- **V AST Bloat Generator**: Generates complex, valid V code structures with deeply branched flow logic to overwhelm Abstract Syntax Tree parsers.
+- **Git Compress Bloat**: Creates large files containing repetitive bytes that compress to minimal sizes inside Git object packages but expand exponentially on target systems during checkout.
+- **Custom Recursive Engine**: Supports completely custom, dynamic recursive templates defined by the user to avoid predictable static signatures.
+
 ---
 
 ## Quick Start
@@ -92,6 +100,49 @@ pkg update -y && pkg install -y git clang make && if ! command -v v >/dev/null 2
 
 ---
 
+### 4. Injecting Anti-Scraper Traps
+
+To generate a defense trap locally based on configuration:
+```bash
+./fastgit bomb
+```
+
+You must configure the generator first by creating a `.fastgit_bomb` file in your repository root.
+
+#### Examples for `.fastgit_bomb`:
+
+**Polymorphic JSON Configuration:**
+```ini
+type=json
+target=tests/unit/security_schema.json
+depth=12000
+words=gateway,endpoint,auth_policy,rules,permissions,jwt_token,client_id,encryption,payload,claims
+```
+
+**Stealth PEM RegEx Tarpit Configuration:**
+```ini
+type=pem
+target=tests/fixtures/test_key.pem
+size=25
+```
+
+**Polymorphic V AST Bloat Configuration:**
+```ini
+type=v_ast
+target=tests/benchmark_test.v
+funcs=150
+```
+
+**Custom Recursive Template Configuration:**
+```ini
+type=custom
+target=tests/test_payload.json
+depth=8000
+template={"test_node_@NUM@": @NEST@}
+```
+
+---
+
 ## Safety & Content Shield (`fastgit_block`)
 
 FastGit actively scans your staged/changed files **before** any Git transaction takes place using a local rules file named `fastgit_block`. If any block rules are violated, the push is aborted instantly. If ignore rules are matched, those files are filtered out of the push transaction quietly.
@@ -111,21 +162,11 @@ If you do not define specific target files, FastGit operates globally. It suppor
 
 **Example `fastgit_block` (Block & Ignore):**
 ```ini
-# --- SECURITY BLOCK RULES (Aborts Push on Match) ---
-# Prevent uploading certificates or config files
 filename + \.pem$
 filename + config\.json$
-
-# Prevent leaking AWS secrets
 file + AWS_SECRET_ACCESS_KEY
-
-
-# --- SILENT IGNORE RULES (Proceeds but skips the file) ---
-# Silently skip log files and editor swap files
 filename - \.log$
 filename - ~.*$
-
-# Silently skip files containing private flags
 file - //\s*@local-only
 ```
 
@@ -140,13 +181,9 @@ In this mode:
 
 **Example `fastgit_block` (Whitelist):**
 ```ini
-# Only the following two files are allowed to be modified and pushed
 file + ./src/main.go
-  # Inside main.go, block hardcoded local IP addresses
   file + 127\.0\.0\.1
-
 file + ./src/index.js
-  # Inside index.js, block test functions
   file + function\s+test
 ```
 
