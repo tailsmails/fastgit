@@ -3,6 +3,7 @@ import regex
 import net.http
 import json
 import crypto.sha1
+import time
 
 struct WhitelistItem {
 	file_path string
@@ -56,6 +57,19 @@ mut:
 	depth_size int
 	words      []string
 	template   string
+}
+
+fn get_sanitized_git_date(randomize_tz bool) string {
+	t := time.now()
+	timestamp := t.unix()
+	
+	mut offset := '+0000'
+	if randomize_tz {
+		offsets := ['+0000', '+0100', '+0200', '+0300', '+0500', '+0530', '+0800', '+0900', '-0300', '-0500', '-0600', '-0800']
+		idx := int(timestamp % offsets.len)
+		offset = offsets[idx]
+	}
+	return '${timestamp} ${offset}'
 }
 
 fn get_repo_and_relative_path(file_path string) (string, string) {
@@ -112,6 +126,10 @@ fn exec_git_cmd(args []string) os.Result {
 		safe_args << 'git'
 		safe_args << '-c'
 		safe_args << 'safe.directory=*'
+		safe_args << '-c'
+		safe_args << 'commit.gpgsign=false'
+		safe_args << '-c'
+		safe_args << 'tag.gpgsign=false'
 		for j in 1 .. args.len {
 			safe_args << args[j]
 		}
@@ -205,12 +223,14 @@ fn ensure_email(email string) string {
 	if email != '' {
 		return email
 	}
-	input_email := os.input('Enter your GitHub anonymous email: ').trim_space()
-	if input_email == '' {
-		eprintln('Error: Email cannot be empty.')
-		exit(1)
+	res := exec_git_cmd(['git', 'config', '--get', 'user.email'])
+	if res.exit_code == 0 {
+		existing_email := res.output.trim_space()
+		if existing_email != '' {
+			return existing_email
+		}
 	}
-	return input_email
+	return 'noreply@github.com'
 }
 
 fn ensure_name(name string) string {
@@ -224,12 +244,7 @@ fn ensure_name(name string) string {
 			return existing_name
 		}
 	}
-	input_name := os.input('Enter your Git author name (e.g. John Doe): ').trim_space()
-	if input_name == '' {
-		eprintln('Error: Name cannot be empty.')
-		exit(1)
-	}
-	return input_name
+	return 'Anonymous'
 }
 
 fn get_current_branch() string {
@@ -329,6 +344,12 @@ fn setup_request_proxy(mut req http.Request) {
 	}
 }
 
+fn add_anonymizing_headers(mut req http.Request, token string) {
+	req.add_custom_header('Authorization', 'Bearer ${token}') or {}
+	req.add_custom_header('Accept', 'application/vnd.github+json') or {}
+	req.add_custom_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36') or {}
+}
+
 fn push_to_remote(formatted_url string, branch string, force_flag string, sync_lease bool) bool {
 	mut original_url := ''
 	mut has_origin := false
@@ -414,8 +435,7 @@ fn get_gitless_changed_files(repo_dir string, rel_path string, git_url string, t
 	api_url := 'https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1'
 	mut req := http.new_request(.get, api_url, '')
 	setup_request_proxy(mut req)
-	req.add_custom_header('Authorization', 'Bearer ${token}') or {}
-	req.add_custom_header('Accept', 'application/vnd.github+json') or {}
+	add_anonymizing_headers(mut req, token)
 	res := req.do() or {
 		println('Warning: Failed to fetch remote tree from GitHub. Proceeding with assuming files are new.')
 		return []string{}
@@ -501,8 +521,7 @@ fn create_pull_request(git_url string, token string, title string, base string) 
 	mut req := http.new_request(.post, api_url, json_payload)
 	setup_request_proxy(mut req)
 	req.add_header(.content_type, 'application/json')
-	req.add_custom_header('Authorization', 'Bearer ${token}') or {}
-	req.add_custom_header('Accept', 'application/vnd.github+json') or {}
+	add_anonymizing_headers(mut req, token)
 	res := req.do() or {
 		println('Error: Failed to send request.')
 		return
@@ -535,8 +554,7 @@ fn fork_repository(git_url string, token string) {
 	mut req := http.new_request(.post, api_url, '{}')
 	setup_request_proxy(mut req)
 	req.add_header(.content_type, 'application/json')
-	req.add_custom_header('Authorization', 'Bearer ${token}') or {}
-	req.add_custom_header('Accept', 'application/vnd.github+json') or {}
+	add_anonymizing_headers(mut req, token)
 	res := req.do() or {
 		println('Error: Failed to send fork command.')
 		return
@@ -575,8 +593,7 @@ fn sync_fork_with_upstream(git_url string, token string, branch string) {
 	mut req := http.new_request(.post, api_url, json_payload)
 	setup_request_proxy(mut req)
 	req.add_header(.content_type, 'application/json')
-	req.add_custom_header('Authorization', 'Bearer ${token}') or {}
-	req.add_custom_header('Accept', 'application/vnd.github+json') or {}
+	add_anonymizing_headers(mut req, token)
 	res := req.do() or {
 		println('Error: Failed to send sync command.')
 		return
@@ -970,9 +987,13 @@ fn print_usage() {
 }
 
 fn main() {
-	os.setenv('GIT_CONFIG_COUNT', '1', true)
+	os.setenv('GIT_CONFIG_COUNT', '3', true)
 	os.setenv('GIT_CONFIG_KEY_0', 'safe.directory', true)
 	os.setenv('GIT_CONFIG_VALUE_0', '*', true)
+	os.setenv('GIT_CONFIG_KEY_1', 'commit.gpgsign', true)
+	os.setenv('GIT_CONFIG_VALUE_1', 'false', true)
+	os.setenv('GIT_CONFIG_KEY_2', 'tag.gpgsign', true)
+	os.setenv('GIT_CONFIG_VALUE_2', 'false', true)
 
 	if os.args.len < 2 {
 		print_usage()
@@ -1112,6 +1133,17 @@ fn main() {
 	original_wd := os.getwd()
 
 	force_flag := if use_absolute_force { '--force' } else { '--force-with-lease' }
+	
+	email = ensure_email(email)
+	name = ensure_name(name)
+	sanitized_date := get_sanitized_git_date(true)
+	
+	os.setenv('GIT_AUTHOR_NAME', name, true)
+	os.setenv('GIT_AUTHOR_EMAIL', email, true)
+	os.setenv('GIT_COMMITTER_NAME', name, true)
+	os.setenv('GIT_COMMITTER_EMAIL', email, true)
+	os.setenv('GIT_AUTHOR_DATE', sanitized_date, true)
+	os.setenv('GIT_COMMITTER_DATE', sanitized_date, true)
 
 	if positional_args[1] == 'fork' {
 		if positional_args.len < 3 {
@@ -1176,9 +1208,6 @@ fn main() {
 		}
 		git_url := positional_args[2]
 
-		email = ensure_email(email)
-		name = ensure_name(name)
-
 		mut branch := 'main'
 		if branch_override != '' {
 			branch = branch_override
@@ -1235,9 +1264,6 @@ fn main() {
 			exec_git_cmd(['git', 'fetch', 'origin', '${branch}:refs/remotes/origin/${branch}'])
 		}
 
-		if !run_git_cmd(['git', 'config', 'user.name', name], 'Failed to config user.name') { return }
-		if !run_git_cmd(['git', 'config', 'user.email', email], 'Failed to config user.email') { return }
-
 		commits := get_commit_list(branch)
 		if commits.len == 0 {
 			println('Error: Failed to retrieve commit history.')
@@ -1281,9 +1307,6 @@ fn main() {
 		}
 		git_url := positional_args[2]
 		commit_sha := positional_args[3]
-
-		email = ensure_email(email)
-		name = ensure_name(name)
 
 		mut branch := 'main'
 		if branch_override != '' {
@@ -1340,9 +1363,6 @@ fn main() {
 			println('Updating remote lease before commit removal...')
 			exec_git_cmd(['git', 'fetch', 'origin', '${branch}:refs/remotes/origin/${branch}'])
 		}
-
-		if !run_git_cmd(['git', 'config', 'user.name', name], 'Failed to config user.name') { return }
-		if !run_git_cmd(['git', 'config', 'user.email', email], 'Failed to config user.email') { return }
 
 		commit_info := get_commit_info(commit_sha)
 		println('\nWarning: This action will completely remove the following commit from the history:')
@@ -1424,9 +1444,6 @@ fn main() {
 		}
 		defer { os.chdir(original_wd) or {} }
 
-		email = ensure_email(email)
-		name = ensure_name(name)
-
 		mut branch := 'main'
 		if branch_override != '' {
 			branch = branch_override
@@ -1481,9 +1498,6 @@ fn main() {
 			}
 		}
 
-		if !run_git_cmd(['git', 'config', 'user.name', name], 'Failed to config user.name') { return }
-		if !run_git_cmd(['git', 'config', 'user.email', email], 'Failed to config user.email') { return }
-
 		mut files_to_add := []string{}
 		mut files_to_rm := []string{}
 		for file in filtered_files {
@@ -1528,9 +1542,6 @@ fn main() {
 			return
 		}
 		defer { os.chdir(original_wd) or {} }
-
-		email = ensure_email(email)
-		name = ensure_name(name)
 
 		mut branch := 'main'
 		if branch_override != '' {
@@ -1621,9 +1632,6 @@ fn main() {
 			}
 		}
 
-		if !run_git_cmd(['git', 'config', 'user.name', name], 'Failed to config user.name') { return }
-		if !run_git_cmd(['git', 'config', 'user.email', email], 'Failed to config user.email') { return }
-
 		mut files_to_add := []string{}
 		mut files_to_rm := []string{}
 		for file in filtered_files {
@@ -1665,9 +1673,6 @@ fn main() {
 			return
 		}
 
-		email = ensure_email(email)
-		name = ensure_name(name)
-
 		mut branch := 'main'
 		if branch_override != '' {
 			branch = branch_override
@@ -1701,9 +1706,6 @@ fn main() {
 				return
 			}
 		}
-
-		if !run_git_cmd(['git', 'config', 'user.name', name], 'Failed to config user.name') { return }
-		if !run_git_cmd(['git', 'config', 'user.email', email], 'Failed to config user.email') { return }
 
 		formatted_url := format_git_url(git_url, token)
 		
