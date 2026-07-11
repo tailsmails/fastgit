@@ -17,7 +17,7 @@ IDENTITY CHECK:
 
 # FastGit
 
-FastGit is a command-line tool written in V, designed to automate and simplify uploading, syncing, and modifying GitHub repositories without leaving a persistent local Git history or directory. 
+FastGit is a command-line tool written in V, designed to automate and simplify uploading, syncing, and modifying GitHub repositories without leaving a persistent local Git history, files, or traces. 
 
 By utilizing remote-tree comparison and temporary directory structures, FastGit allows you to push changes, rollback last commits, or remove intermediate commits while keeping your local workspace clean.
 
@@ -40,18 +40,12 @@ By utilizing remote-tree comparison and temporary directory structures, FastGit 
 - **Specific Commit Removal (`remove`)**: Deletes a specific intermediate commit from history using `git rebase --onto`.
 - **Root-Commit Handling**: If you delete the first/only commit, FastGit creates an empty commit using `git read-tree --empty` to safely wipe all remote files. If there are multiple commits, it automatically converts the second commit into the new root.
 
-### 4. Anonymity & Evasion Options
+### 4. Anonymity & Zero-Footprint Security
 - **URL Translation**: Converts SSH URLs (e.g. `git@github.com:...`) to token-authenticated HTTPS URLs to prevent local SSH keys from being exposed on egress traffic.
-- **Identity Override**: Rewrites the temporary repository's `user.name` and `user.email` dynamically before making commits.
+- **Dynamic Environment Isolation**: Instead of writing to local `.git/config` on disk, FastGit proactively injects environment variables (`GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, `GIT_COMMITTER_EMAIL`) at runtime. This guarantees that your Committer details match your Author details and leaves absolutely zero footprints on your storage.
+- **Timezone Offset Randomization**: Automatically sanitizes and randomizes the timezone offset (`GIT_AUTHOR_DATE` and `GIT_COMMITTER_DATE`) using UTC-neutral or randomized offsets to prevent geolocation correlation from your active working hours.
+- **GPG Signing Bypass**: Explicitly disables local commit and tag GPG signing (`gpgsign=false`) to block your local GPG Key ID from being embedded in the commit metadata.
 - **Delta Control (`--lazy`)**: Pushing with `-lazy` or `--lazy` triggers `git add --ignore-removal`, preserving remote files that are not present in your local directory.
-
-### 5. Anti-Scraper Defensive Traps (`bomb`)
-- **Polymorphic JSON Tarpit**: Generates highly nested JSON structures using contextual keywords to bypass basic recursion filters and trigger parser crashes.
-- **Stealth PEM RegEx Tarpit**: Creates valid-looking Private Key certificates with extreme continuous character streams, causing Catastrophic Backtracking in scraper regular expression engines.
-- **Billion Laughs XML Expansion**: Leverages nested XML entities to consume CPU and RAM resources when evaluated by target parser architectures.
-- **V AST Bloat Generator**: Generates complex, valid V code structures with deeply branched flow logic to overwhelm Abstract Syntax Tree parsers.
-- **Git Compress Bloat**: Creates large files containing repetitive bytes that compress to minimal sizes inside Git object packages but expand exponentially on target systems during checkout.
-- **Custom Recursive Engine**: Supports completely custom, dynamic recursive templates defined by the user to avoid predictable static signatures.
 
 ---
 
@@ -112,51 +106,14 @@ pkg update -y && pkg install -y git clang make && if ! command -v v >/dev/null 2
 
 **Create a Pull Request:**
 ```bash
-./fastgit pr https://github.com/upstream/repo "PR Title" main
+./fastgit pr https://github.com/upstream/repo "PR Title" [base_branch] [pr_body]
 ```
 
----
-
-### 4. Injecting Anti-Scraper Traps
-
-To generate a defense trap locally based on configuration:
-```bash
-./fastgit bomb
-```
-
-You must configure the generator first by creating a `.fastgit_bomb` file in your repository root.
-
-#### Examples for `.fastgit_bomb`:
-
-**Polymorphic JSON Configuration:**
-```ini
-type=json
-target=tests/unit/security_schema.json
-depth=12000
-words=gateway,endpoint,auth_policy,rules,permissions,jwt_token,client_id,encryption,payload,claims
-```
-
-**Stealth PEM RegEx Tarpit Configuration:**
-```ini
-type=pem
-target=tests/fixtures/test_key.pem
-size=25
-```
-
-**Polymorphic V AST Bloat Configuration:**
-```ini
-type=v_ast
-target=tests/benchmark_test.v
-funcs=150
-```
-
-**Custom Recursive Template Configuration:**
-```ini
-type=custom
-target=tests/test_payload.json
-depth=8000
-template={"test_node_@NUM@": @NEST@}
-```
+*FastGit automates this entire flow under the hood:*
+1. Inspects the working directory and warns if you have uncommitted changes.
+2. Prevents conflicts by checking if the head branch and base branch are identical inside your own repository.
+3. **Auto-Push Integration**: Resolves your local remote origin (even when targeting an upstream/fork repository), formats it with your secure token, and automatically pushes your local branch to your GitHub repository first. You never need to run `git push` manually before creating a PR!
+4. Submits the PR payload using a browser-spoofed User-Agent to avoid client fingerprinting.
 
 ---
 
@@ -212,6 +169,8 @@ file + ./src/index.js
 | :--- | :--- | :--- |
 | **SSH Key Metadata Leak** | Pushing via SSH uses local keys, which can reveal your GitHub identity. | **URL Redirect** translates SSH paths to token-authenticated HTTPS URLs. |
 | **Parent Folder Conflict** | Upward lookup of `.git` folder binds to higher directories (like home folders). | **Local Isolation** checks only the immediate target directory for `.git`. |
+| **GPG Key Identity Leak** | GPG commit/tag signing embeds your local key ID into commit records. | **Sign Bypass** injects configuration flags to strictly override and disable local signing. |
+| **Geolocation Tracking** | System timezone offsets (e.g. `+0330`) reveal physical location/country. | **Zone Randomizer** sanitizes dates and randomizes offsets on environment dates. |
 | **Persistent Configuration Leak** | Commits and configs are stored inside local project folders. | **Teardown** deletes the temporary `.git` folder immediately upon program exit. |
 | **Accidental File Exposure** | Orphan branch checkouts might stage unwanted local files. | **Clean Index** empties the Git staging index via `git read-tree --empty` before committing empty states. |
 

