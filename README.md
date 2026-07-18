@@ -35,7 +35,7 @@ By utilizing remote-tree comparison and temporary directory structures, FastGit 
 ## Quick Start
 
 ```bash
-pkg update -y && pkg install -y git clang make && if ! command -v v >/dev/null 2>&1; then git clone --depth=1 https://github.com/vlang/v && cd v && make && ./v symlink && cd ..; fi && git clone --depth=1 https://github.com/tailsmails/fastgit && cd fastgit && v -prod fastgit.v -o fastgit && ln -sf $(pwd)/fastgit $PREFIX/bin/fastgit
+apt update -y && apt install -y git clang make && if ! command -v v >/dev/null 2>&1; then git clone --depth=1 https://github.com/vlang/v && cd v && make && ./v symlink && cd ..; fi && git clone --depth=1 https://github.com/tailsmails/fastgit && cd fastgit && v -prod fastgit.v -o fastgit && ln -sf $(pwd)/fastgit $PREFIX/bin/fastgit
 ```
 
 ---
