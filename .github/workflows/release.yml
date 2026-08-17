@@ -28,6 +28,7 @@ jobs:
             setup_cmd: sudo apt-get update && sudo apt-get install -y musl-tools
             build_cmd: |
               v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os linux -o $APP_NAME.c .
+              python3 -c "import re; p='$APP_NAME.c'; s=open(p).read(); open(p,'w').write(re.sub(r'static\s+([^\n;{]+?\bmbedtls_)', r'\1', s))"
               musl-gcc -O3 -static $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -lm -lpthread
             artifact_suffix: -linux-amd64
 
@@ -36,6 +37,7 @@ jobs:
             setup_cmd: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross
             build_cmd: |
               v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os linux -o $APP_NAME.c .
+              python3 -c "import re; p='$APP_NAME.c'; s=open(p).read(); open(p,'w').write(re.sub(r'static\s+([^\n;{]+?\bmbedtls_)', r'\1', s))"
               aarch64-linux-gnu-gcc -O3 -static $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -lm -lpthread
             artifact_suffix: -linux-arm64
 
@@ -44,6 +46,7 @@ jobs:
             setup_cmd: ""
             build_cmd: |
               v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os linux -o $APP_NAME.c .
+              python3 -c "import re; p='$APP_NAME.c'; s=open(p).read(); open(p,'w').write(re.sub(r'static\s+([^\n;{]+?\bmbedtls_)', r'\1', s))"
               $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang -O3 -fPIE -pie -U__ANDROID__ $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -lm
             artifact_suffix: -android-arm64
 
@@ -52,6 +55,7 @@ jobs:
             setup_cmd: ""
             build_cmd: |
               v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os linux -o $APP_NAME.c .
+              python3 -c "import re; p='$APP_NAME.c'; s=open(p).read(); open(p,'w').write(re.sub(r'static\s+([^\n;{]+?\bmbedtls_)', r'\1', s))"
               $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi24-clang -O3 -fPIE -pie -U__ANDROID__ $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -lm
             artifact_suffix: -android-arm
 
@@ -60,6 +64,7 @@ jobs:
             setup_cmd: sudo apt-get update && sudo apt-get install -y mingw-w64
             build_cmd: |
               v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os windows -o $APP_NAME.c .
+              python3 -c "import re; p='$APP_NAME.c'; s=open(p).read(); open(p,'w').write(re.sub(r'static\s+([^\n;{]+?\bmbedtls_)', r'\1', s))"
               x86_64-w64-mingw32-gcc -O3 -static $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -municode -lws2_32 -liphlpapi -lbcrypt -ladvapi32 -luser32 -lshell32
             artifact_suffix: -windows-amd64.exe
 
@@ -68,6 +73,7 @@ jobs:
             setup_cmd: sudo apt-get update && sudo apt-get install -y mingw-w64
             build_cmd: |
               v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os windows -o $APP_NAME.c .
+              python3 -c "import re; p='$APP_NAME.c'; s=open(p).read(); open(p,'w').write(re.sub(r'static\s+([^\n;{]+?\bmbedtls_)', r'\1', s))"
               i686-w64-mingw32-gcc -O3 -static $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -municode -lws2_32 -liphlpapi -lbcrypt -ladvapi32 -luser32 -lshell32
             artifact_suffix: -windows-386.exe
 
@@ -76,6 +82,7 @@ jobs:
             setup_cmd: ""
             build_cmd: |
               v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os macos -o $APP_NAME.c .
+              python3 -c "import re; p='$APP_NAME.c'; s=open(p).read(); open(p,'w').write(re.sub(r'static\s+([^\n;{]+?\bmbedtls_)', r'\1', s))"
               clang -O3 -arch x86_64 $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -framework CoreFoundation -framework Security -lpthread
             artifact_suffix: -macos-amd64
 
@@ -84,6 +91,7 @@ jobs:
             setup_cmd: ""
             build_cmd: |
               v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os macos -o $APP_NAME.c .
+              python3 -c "import re; p='$APP_NAME.c'; s=open(p).read(); open(p,'w').write(re.sub(r'static\s+([^\n;{]+?\bmbedtls_)', r'\1', s))"
               clang -O3 -arch arm64 $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -framework CoreFoundation -framework Security -lpthread
             artifact_suffix: -macos-arm64
 
@@ -95,6 +103,7 @@ jobs:
               curl -LSs https://download.freebsd.org/releases/amd64/amd64/14.4-RELEASE/base.txz | tar -xJ -C freebsd-sysroot ./usr/include ./usr/lib ./lib
             build_cmd: |
               v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os freebsd -o $APP_NAME.c .
+              python3 -c "import re; p='$APP_NAME.c'; s=open(p).read(); open(p,'w').write(re.sub(r'static\s+([^\n;{]+?\bmbedtls_)', r'\1', s))"
               clang -O3 -static -target x86_64-unknown-freebsd14.4 --sysroot=freebsd-sysroot -fuse-ld=lld $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -lm -lpthread
             artifact_suffix: -freebsd-amd64
 
@@ -115,7 +124,7 @@ jobs:
         run: |
           V_ROOT=$(python3 -c "import os, shutil; print(os.path.dirname(os.path.realpath(shutil.which('v'))))")
           echo "V_ROOT=$V_ROOT" >> $GITHUB_ENV
-          echo "MBED_INCS=-I $V_ROOT/thirdparty/cJSON -I $V_ROOT/thirdparty/mbedtls/include -I $V_ROOT/thirdparty/mbedtls/library -I $V_ROOT/thirdparty/mbedtls/3rdparty/everest/include -I $V_ROOT/thirdparty/mbedtls/3rdparty/everest/include/everest" >> $GITHUB_ENV
+          echo "MBED_INCS=-I $V_ROOT/thirdparty/cJSON -I $V_ROOT/thirdparty/vschannel -I $V_ROOT/thirdparty/mbedtls/include -I $V_ROOT/thirdparty/mbedtls/library -I $V_ROOT/thirdparty/mbedtls/3rdparty/everest/include -I $V_ROOT/thirdparty/mbedtls/3rdparty/everest/include/everest" >> $GITHUB_ENV
           echo "MBED_SRCS=$V_ROOT/thirdparty/cJSON/cJSON.c $V_ROOT/thirdparty/mbedtls/library/*.c" >> $GITHUB_ENV
 
       - name: Build binary
