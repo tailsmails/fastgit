@@ -27,56 +27,64 @@ jobs:
             runner: ubuntu-latest
             setup_cmd: sudo apt-get update && sudo apt-get install -y musl-tools
             build_cmd: |
-              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -cc musl-gcc -cflags "-static" -o $APP_NAME$SUFFIX .
+              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os linux -o $APP_NAME.c .
+              musl-gcc -O3 -static $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -lm -lpthread
             artifact_suffix: -linux-amd64
 
           - target: linux-arm64
             runner: ubuntu-latest
             setup_cmd: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross
             build_cmd: |
-              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os linux -cc aarch64-linux-gnu-gcc -cflags "-static" -o $APP_NAME$SUFFIX .
+              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os linux -o $APP_NAME.c .
+              aarch64-linux-gnu-gcc -O3 -static $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -lm -lpthread
             artifact_suffix: -linux-arm64
 
           - target: android-arm64
             runner: ubuntu-latest
             setup_cmd: ""
             build_cmd: |
-              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os linux -cc "$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang" -cflags "-fPIE -pie -U__ANDROID__" -o $APP_NAME$SUFFIX .
+              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os linux -o $APP_NAME.c .
+              $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang -O3 -fPIE -pie -U__ANDROID__ $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -lm
             artifact_suffix: -android-arm64
 
           - target: android-arm
             runner: ubuntu-latest
             setup_cmd: ""
             build_cmd: |
-              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os linux -cc "$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi24-clang" -cflags "-fPIE -pie -U__ANDROID__" -o $APP_NAME$SUFFIX .
+              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os linux -o $APP_NAME.c .
+              $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi24-clang -O3 -fPIE -pie -U__ANDROID__ $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -lm
             artifact_suffix: -android-arm
 
           - target: windows-amd64
             runner: ubuntu-latest
             setup_cmd: sudo apt-get update && sudo apt-get install -y mingw-w64
             build_cmd: |
-              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os windows -cc x86_64-w64-mingw32-gcc -cflags "-static -municode" -o $APP_NAME$SUFFIX .
+              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os windows -o $APP_NAME.c .
+              x86_64-w64-mingw32-gcc -O3 -static $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -municode -lws2_32 -liphlpapi -lbcrypt -ladvapi32 -luser32 -lshell32
             artifact_suffix: -windows-amd64.exe
 
           - target: windows-386
             runner: ubuntu-latest
             setup_cmd: sudo apt-get update && sudo apt-get install -y mingw-w64
             build_cmd: |
-              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os windows -cc i686-w64-mingw32-gcc -cflags "-static -municode" -o $APP_NAME$SUFFIX .
+              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os windows -o $APP_NAME.c .
+              i686-w64-mingw32-gcc -O3 -static $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -municode -lws2_32 -liphlpapi -lbcrypt -ladvapi32 -luser32 -lshell32
             artifact_suffix: -windows-386.exe
 
           - target: macos-amd64
             runner: macos-latest
             setup_cmd: ""
             build_cmd: |
-              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -cflags "-arch x86_64" -o $APP_NAME$SUFFIX .
+              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os macos -o $APP_NAME.c .
+              clang -O3 -arch x86_64 $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -framework CoreFoundation -framework Security -lpthread
             artifact_suffix: -macos-amd64
 
           - target: macos-arm64
             runner: macos-latest
             setup_cmd: ""
             build_cmd: |
-              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -cflags "-arch arm64" -o $APP_NAME$SUFFIX .
+              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os macos -o $APP_NAME.c .
+              clang -O3 -arch arm64 $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -framework CoreFoundation -framework Security -lpthread
             artifact_suffix: -macos-arm64
 
           - target: freebsd-amd64
@@ -86,7 +94,8 @@ jobs:
               mkdir -p freebsd-sysroot
               curl -LSs https://download.freebsd.org/releases/amd64/amd64/14.4-RELEASE/base.txz | tar -xJ -C freebsd-sysroot ./usr/include ./usr/lib ./lib
             build_cmd: |
-              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os freebsd -cc clang -cflags "-static -target x86_64-unknown-freebsd14.4 --sysroot=freebsd-sysroot -fuse-ld=lld -lm -lpthread" -o $APP_NAME$SUFFIX .
+              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os freebsd -o $APP_NAME.c .
+              clang -O3 -static -target x86_64-unknown-freebsd14.4 --sysroot=freebsd-sysroot -fuse-ld=lld $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -lm -lpthread
             artifact_suffix: -freebsd-amd64
 
     steps:
@@ -101,6 +110,13 @@ jobs:
       - name: Setup Compiler Dependencies
         if: matrix.setup_cmd != ''
         run: ${{ matrix.setup_cmd }}
+
+      - name: Setup Environment Variables
+        run: |
+          V_ROOT=$(python3 -c "import os, shutil; print(os.path.dirname(os.path.realpath(shutil.which('v'))))")
+          echo "V_ROOT=$V_ROOT" >> $GITHUB_ENV
+          echo "MBED_INCS=-I $V_ROOT/thirdparty/cJSON -I $V_ROOT/thirdparty/mbedtls/include -I $V_ROOT/thirdparty/mbedtls/library -I $V_ROOT/thirdparty/mbedtls/3rdparty/everest/include -I $V_ROOT/thirdparty/mbedtls/3rdparty/everest/include/everest" >> $GITHUB_ENV
+          echo "MBED_SRCS=$V_ROOT/thirdparty/cJSON/cJSON.c $V_ROOT/thirdparty/mbedtls/library/*.c" >> $GITHUB_ENV
 
       - name: Build binary
         run: ${{ matrix.build_cmd }}
