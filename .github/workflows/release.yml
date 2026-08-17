@@ -3,23 +3,110 @@ name: Auto Release
 on:
   push:
     branches: [ main, master ]
+    paths:
+      - '**/*.v'
+      - '**/*.yml'
   workflow_dispatch:
 
 permissions:
   contents: write
 
+env:
+  APP_NAME: fastgit
+  EXTRA_FLAGS: ""
+
 jobs:
-  release:
+  build:
     runs-on: ${{ matrix.runner }}
 
     strategy:
       fail-fast: false
       matrix:
         include:
-          - arch: amd64
+          - target: linux-amd64
             runner: ubuntu-latest
-            build_cmd: v -enable-globals -prod -cflags "-static" -os linux -arch amd64 -o fastgit-linux-amd64 .
-            
+            setup_cmd: sudo apt-get update && sudo apt-get install -y musl-tools
+            build_cmd: |
+              V_ROOT=$(dirname $(readlink -f $(which v)))
+              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os linux -o $APP_NAME.c .
+              musl-gcc -O3 -static -I "$V_ROOT/thirdparty/cJSON" $APP_NAME.c "$V_ROOT/thirdparty/cJSON/cJSON.c" -o $APP_NAME$SUFFIX -lm
+            artifact_suffix: -linux-amd64
+
+          - target: linux-arm64
+            runner: ubuntu-latest
+            setup_cmd: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross
+            build_cmd: |
+              V_ROOT=$(dirname $(readlink -f $(which v)))
+              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os linux -o $APP_NAME.c .
+              aarch64-linux-gnu-gcc -O3 -static -I "$V_ROOT/thirdparty/cJSON" $APP_NAME.c "$V_ROOT/thirdparty/cJSON/cJSON.c" -o $APP_NAME$SUFFIX -lm
+            artifact_suffix: -linux-arm64
+
+          - target: android-arm64
+            runner: ubuntu-latest
+            setup_cmd: ""
+            build_cmd: |
+              V_ROOT=$(dirname $(readlink -f $(which v)))
+              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os linux -o $APP_NAME.c .
+              $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang -O3 -fPIE -pie -U__ANDROID__ -I "$V_ROOT/thirdparty/cJSON" $APP_NAME.c "$V_ROOT/thirdparty/cJSON/cJSON.c" -o $APP_NAME$SUFFIX -lm
+            artifact_suffix: -android-arm64
+
+          - target: android-arm
+            runner: ubuntu-latest
+            setup_cmd: ""
+            build_cmd: |
+              V_ROOT=$(dirname $(readlink -f $(which v)))
+              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os linux -o $APP_NAME.c .
+              $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi24-clang -O3 -fPIE -pie -U__ANDROID__ -I "$V_ROOT/thirdparty/cJSON" $APP_NAME.c "$V_ROOT/thirdparty/cJSON/cJSON.c" -o $APP_NAME$SUFFIX -lm
+            artifact_suffix: -android-arm
+
+          - target: windows-amd64
+            runner: ubuntu-latest
+            setup_cmd: sudo apt-get update && sudo apt-get install -y mingw-w64
+            build_cmd: |
+              V_ROOT=$(dirname $(readlink -f $(which v)))
+              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os windows -o $APP_NAME.c .
+              x86_64-w64-mingw32-gcc -O3 -static -I "$V_ROOT/thirdparty/cJSON" $APP_NAME.c "$V_ROOT/thirdparty/cJSON/cJSON.c" -o $APP_NAME$SUFFIX -municode -lws2_32 -liphlpapi -lbcrypt -ladvapi32 -luser32 -lshell32
+            artifact_suffix: -windows-amd64.exe
+
+          - target: windows-386
+            runner: ubuntu-latest
+            setup_cmd: sudo apt-get update && sudo apt-get install -y mingw-w64
+            build_cmd: |
+              V_ROOT=$(dirname $(readlink -f $(which v)))
+              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os windows -o $APP_NAME.c .
+              i686-w64-mingw32-gcc -O3 -static -I "$V_ROOT/thirdparty/cJSON" $APP_NAME.c "$V_ROOT/thirdparty/cJSON/cJSON.c" -o $APP_NAME$SUFFIX -municode -lws2_32 -liphlpapi -lbcrypt -ladvapi32 -luser32 -lshell32
+            artifact_suffix: -windows-386.exe
+
+          - target: macos-amd64
+            runner: macos-latest
+            setup_cmd: ""
+            build_cmd: |
+              V_ROOT=$(python3 -c "import os, sys, shutil; print(os.path.dirname(os.path.realpath(shutil.which('v'))))")
+              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os macos -o $APP_NAME.c .
+              clang -O3 -arch x86_64 -I "$V_ROOT/thirdparty/cJSON" $APP_NAME.c "$V_ROOT/thirdparty/cJSON/cJSON.c" -o $APP_NAME$SUFFIX -framework CoreFoundation
+            artifact_suffix: -macos-amd64
+
+          - target: macos-arm64
+            runner: macos-latest
+            setup_cmd: ""
+            build_cmd: |
+              V_ROOT=$(python3 -c "import os, sys, shutil; print(os.path.dirname(os.path.realpath(shutil.which('v'))))")
+              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os macos -o $APP_NAME.c .
+              clang -O3 -arch arm64 -I "$V_ROOT/thirdparty/cJSON" $APP_NAME.c "$V_ROOT/thirdparty/cJSON/cJSON.c" -o $APP_NAME$SUFFIX -framework CoreFoundation
+            artifact_suffix: -macos-arm64
+
+          - target: freebsd-amd64
+            runner: ubuntu-latest
+            setup_cmd: |
+              sudo apt-get update && sudo apt-get install -y clang lld
+              mkdir -p freebsd-sysroot
+              curl -LSs https://download.freebsd.org/releases/amd64/amd64/14.4-RELEASE/base.txz | tar -xJ -C freebsd-sysroot ./usr/include ./usr/lib ./lib
+            build_cmd: |
+              V_ROOT=$(dirname $(readlink -f $(which v)))
+              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os freebsd -o $APP_NAME.c .
+              clang -O3 -static -target x86_64-unknown-freebsd14.4 --sysroot=freebsd-sysroot -fuse-ld=lld -I "$V_ROOT/thirdparty/cJSON" $APP_NAME.c "$V_ROOT/thirdparty/cJSON/cJSON.c" -o $APP_NAME$SUFFIX -lm -lpthread
+            artifact_suffix: -freebsd-amd64
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,18 +116,60 @@ jobs:
         with:
           check-latest: true
 
-      - name: Install dependencies
-        run:
+      - name: Setup Compiler Dependencies
+        if: matrix.setup_cmd != ''
+        run: ${{ matrix.setup_cmd }}
 
+      - name: Setup Dependencies
+        run: echo "No extra dependencies"
+        
       - name: Build binary
         run: ${{ matrix.build_cmd }}
+        env:
+          SUFFIX: ${{ matrix.artifact_suffix }}
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}${{ matrix.artifact_suffix }}
+          path: ${{ env.APP_NAME }}${{ matrix.artifact_suffix }}
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+          merge-multiple: true
+
+      - name: Delete older releases and git tags
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "=== Phase 1: Pruning older releases ==="
+          gh release list --limit 1000 --json tagName --jq '.[].tagName' | while read -r tag; do
+            if [ "$tag" != "latest" ] && [ -n "$tag" ]; then
+              echo "Deleting release: $tag"
+              gh release delete "$tag" --yes --cleanup-tag || true
+            fi
+          done
+
+          echo "=== Phase 2: Pruning orphaned git tags (All Pages) ==="
+          gh api --paginate "repos/${{ github.repository }}/tags" --jq '.[].name' | while read -r tag; do
+            if [ "$tag" != "latest" ] && [ -n "$tag" ]; then
+              echo "Pruning remote git tag ref: $tag"
+              gh api -X DELETE "repos/${{ github.repository }}/git/refs/tags/$tag" || true
+            fi
+          done
 
       - name: Upload to Release
         uses: ncipollo/release-action@v1
         with:
-          tag: build-${{ github.run_number }}
+          tag: latest
           name: Build ${{ github.run_number }}
-          artifacts: fastgit-linux-${{ matrix.arch }}
+          artifacts: ./artifacts/*
           generateReleaseNotes: true
           allowUpdates: true
           token: ${{ secrets.GITHUB_TOKEN }}
