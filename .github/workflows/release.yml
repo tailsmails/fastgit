@@ -25,86 +25,68 @@ jobs:
         include:
           - target: linux-amd64
             runner: ubuntu-latest
+            v_os: linux
             setup_cmd: sudo apt-get update && sudo apt-get install -y musl-tools
-            build_cmd: |
-              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os linux -o $APP_NAME.c .
-              python3 -c "import re; p='$APP_NAME.c'; s=open(p).read(); open(p,'w').write(re.sub(r'static\s+([^\n;{]+?\bmbedtls_)', r'\1', s))"
-              musl-gcc -O3 -static $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -lm -lpthread
+            compile_cmd: musl-gcc -O3 -static $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -lm -lpthread
             artifact_suffix: -linux-amd64
 
           - target: linux-arm64
             runner: ubuntu-latest
+            v_os: linux
             setup_cmd: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross
-            build_cmd: |
-              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os linux -o $APP_NAME.c .
-              python3 -c "import re; p='$APP_NAME.c'; s=open(p).read(); open(p,'w').write(re.sub(r'static\s+([^\n;{]+?\bmbedtls_)', r'\1', s))"
-              aarch64-linux-gnu-gcc -O3 -static $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -lm -lpthread
+            compile_cmd: aarch64-linux-gnu-gcc -O3 -static $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -lm -lpthread
             artifact_suffix: -linux-arm64
 
           - target: android-arm64
             runner: ubuntu-latest
+            v_os: linux
             setup_cmd: ""
-            build_cmd: |
-              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os linux -o $APP_NAME.c .
-              python3 -c "import re; p='$APP_NAME.c'; s=open(p).read(); open(p,'w').write(re.sub(r'static\s+([^\n;{]+?\bmbedtls_)', r'\1', s))"
-              $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang -O3 -fPIE -pie -U__ANDROID__ $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -lm
+            compile_cmd: $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang -O3 -fPIE -pie -U__ANDROID__ $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -lm
             artifact_suffix: -android-arm64
 
           - target: android-arm
             runner: ubuntu-latest
+            v_os: linux
             setup_cmd: ""
-            build_cmd: |
-              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os linux -o $APP_NAME.c .
-              python3 -c "import re; p='$APP_NAME.c'; s=open(p).read(); open(p,'w').write(re.sub(r'static\s+([^\n;{]+?\bmbedtls_)', r'\1', s))"
-              $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi24-clang -O3 -fPIE -pie -U__ANDROID__ $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -lm
+            compile_cmd: $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi24-clang -O3 -fPIE -pie -U__ANDROID__ $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -lm
             artifact_suffix: -android-arm
 
           - target: windows-amd64
             runner: ubuntu-latest
+            v_os: windows
             setup_cmd: sudo apt-get update && sudo apt-get install -y mingw-w64
-            build_cmd: |
-              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os windows -o $APP_NAME.c .
-              python3 -c "import re; p='$APP_NAME.c'; s=open(p).read(); open(p,'w').write(re.sub(r'static\s+([^\n;{]+?\bmbedtls_)', r'\1', s))"
-              x86_64-w64-mingw32-gcc -O3 -static $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -municode -lws2_32 -liphlpapi -lbcrypt -ladvapi32 -luser32 -lshell32
+            compile_cmd: x86_64-w64-mingw32-gcc -O3 -static $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -municode -lws2_32 -liphlpapi -lbcrypt -ladvapi32 -luser32 -lshell32
             artifact_suffix: -windows-amd64.exe
 
           - target: windows-386
             runner: ubuntu-latest
+            v_os: windows
             setup_cmd: sudo apt-get update && sudo apt-get install -y mingw-w64
-            build_cmd: |
-              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os windows -o $APP_NAME.c .
-              python3 -c "import re; p='$APP_NAME.c'; s=open(p).read(); open(p,'w').write(re.sub(r'static\s+([^\n;{]+?\bmbedtls_)', r'\1', s))"
-              i686-w64-mingw32-gcc -O3 -static $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -municode -lws2_32 -liphlpapi -lbcrypt -ladvapi32 -luser32 -lshell32
+            compile_cmd: i686-w64-mingw32-gcc -O3 -static $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -municode -lws2_32 -liphlpapi -lbcrypt -ladvapi32 -luser32 -lshell32
             artifact_suffix: -windows-386.exe
 
           - target: macos-amd64
             runner: macos-latest
+            v_os: macos
             setup_cmd: ""
-            build_cmd: |
-              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os macos -o $APP_NAME.c .
-              python3 -c "import re; p='$APP_NAME.c'; s=open(p).read(); open(p,'w').write(re.sub(r'static\s+([^\n;{]+?\bmbedtls_)', r'\1', s))"
-              clang -O3 -arch x86_64 $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -framework CoreFoundation -framework Security -lpthread
+            compile_cmd: clang -O3 -arch x86_64 $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -framework CoreFoundation -framework Security -lpthread
             artifact_suffix: -macos-amd64
 
           - target: macos-arm64
             runner: macos-latest
+            v_os: macos
             setup_cmd: ""
-            build_cmd: |
-              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os macos -o $APP_NAME.c .
-              python3 -c "import re; p='$APP_NAME.c'; s=open(p).read(); open(p,'w').write(re.sub(r'static\s+([^\n;{]+?\bmbedtls_)', r'\1', s))"
-              clang -O3 -arch arm64 $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -framework CoreFoundation -framework Security -lpthread
+            compile_cmd: clang -O3 -arch arm64 $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -framework CoreFoundation -framework Security -lpthread
             artifact_suffix: -macos-arm64
 
           - target: freebsd-amd64
             runner: ubuntu-latest
+            v_os: freebsd
             setup_cmd: |
               sudo apt-get update && sudo apt-get install -y clang lld
               mkdir -p freebsd-sysroot
               curl -LSs https://download.freebsd.org/releases/amd64/amd64/14.4-RELEASE/base.txz | tar -xJ -C freebsd-sysroot ./usr/include ./usr/lib ./lib
-            build_cmd: |
-              v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os freebsd -o $APP_NAME.c .
-              python3 -c "import re; p='$APP_NAME.c'; s=open(p).read(); open(p,'w').write(re.sub(r'static\s+([^\n;{]+?\bmbedtls_)', r'\1', s))"
-              clang -O3 -static -target x86_64-unknown-freebsd14.4 --sysroot=freebsd-sysroot -fuse-ld=lld $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -lm -lpthread
+            compile_cmd: clang -O3 -static -target x86_64-unknown-freebsd14.4 --sysroot=freebsd-sysroot -fuse-ld=lld $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -lm -lpthread
             artifact_suffix: -freebsd-amd64
 
     steps:
@@ -126,11 +108,34 @@ jobs:
           echo "V_ROOT=$V_ROOT" >> $GITHUB_ENV
           echo "MBED_INCS=-I $V_ROOT/thirdparty/cJSON -I $V_ROOT/thirdparty/vschannel -I $V_ROOT/thirdparty/mbedtls/include -I $V_ROOT/thirdparty/mbedtls/library -I $V_ROOT/thirdparty/mbedtls/3rdparty/everest/include -I $V_ROOT/thirdparty/mbedtls/3rdparty/everest/include/everest" >> $GITHUB_ENV
           echo "MBED_SRCS=$V_ROOT/thirdparty/cJSON/cJSON.c $V_ROOT/thirdparty/mbedtls/library/*.c" >> $GITHUB_ENV
+          echo "SUFFIX=${{ matrix.artifact_suffix }}" >> $GITHUB_ENV
 
-      - name: Build binary
-        run: ${{ matrix.build_cmd }}
-        env:
-          SUFFIX: ${{ matrix.artifact_suffix }}
+      - name: Generate C Source
+        run: |
+          v $EXTRA_FLAGS -d no_backtrace -enable-globals -autofree -os ${{ matrix.v_os }} -o $APP_NAME.c .
+
+      - name: Patch C Source
+        run: |
+          python3 -c "
+          import re
+          with open('$APP_NAME.c', 'r') as f:
+              text = f.read()
+
+          text = re.sub(r'static\s+void\s+mbedtls_ssl_config_free\s*\(', 'static void v_mbedtls_ssl_config_free(', text)
+          text = re.sub(r'static\s+void\s+mbedtls_x509_crt_free\s*\(', 'static void v_mbedtls_x509_crt_free(', text)
+
+          text = re.sub(r'\bmbedtls_ssl_config_free\s*\(\s*(\(?\s*&?\s*[a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+|->[a-zA-Z0-9_]+)*\s*\)?)\s*\)', 
+              lambda m: f'v_mbedtls_ssl_config_free({m.group(1)})' if 'conf' not in m.group(1) and 'mbedtls_ssl_config' not in m.group(1) else m.group(0), text)
+
+          text = re.sub(r'\bmbedtls_x509_crt_free\s*\(\s*(\(?\s*&?\s*[a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+|->[a-zA-Z0-9_]+)*\s*\)?)\s*\)', 
+              lambda m: f'v_mbedtls_x509_crt_free({m.group(1)})' if 'crt' not in m.group(1) and 'cacert' not in m.group(1) and 'mbedtls_x509_crt' not in m.group(1) else m.group(0), text)
+
+          with open('$APP_NAME.c', 'w') as f:
+              f.write(text)
+          "
+
+      - name: Compile Binary
+        run: ${{ matrix.compile_cmd }}
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
