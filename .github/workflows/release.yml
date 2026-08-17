@@ -41,43 +41,15 @@ jobs:
             runner: ubuntu-latest
             v_os: linux
             setup_cmd: ""
-            compile_cmd: $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang -O3 -fPIE -pie -U__ANDROID__ $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -lm
+            compile_cmd: $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang -O3 -fPIE -pie -U__ANDROID__ $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -lm
             artifact_suffix: -android-arm64
 
           - target: android-arm
             runner: ubuntu-latest
             v_os: linux
             setup_cmd: ""
-            compile_cmd: $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi24-clang -O3 -fPIE -pie -U__ANDROID__ $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -lm
+            compile_cmd: $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi28-clang -O3 -fPIE -pie -U__ANDROID__ $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -lm
             artifact_suffix: -android-arm
-
-          - target: windows-amd64
-            runner: ubuntu-latest
-            v_os: windows
-            setup_cmd: sudo apt-get update && sudo apt-get install -y mingw-w64
-            compile_cmd: x86_64-w64-mingw32-gcc -O3 -static $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -municode -lws2_32 -liphlpapi -lbcrypt -ladvapi32 -luser32 -lshell32
-            artifact_suffix: -windows-amd64.exe
-
-          - target: windows-386
-            runner: ubuntu-latest
-            v_os: windows
-            setup_cmd: sudo apt-get update && sudo apt-get install -y mingw-w64
-            compile_cmd: i686-w64-mingw32-gcc -O3 -static $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -municode -lws2_32 -liphlpapi -lbcrypt -ladvapi32 -luser32 -lshell32
-            artifact_suffix: -windows-386.exe
-
-          - target: macos-amd64
-            runner: macos-latest
-            v_os: macos
-            setup_cmd: ""
-            compile_cmd: clang -O3 -arch x86_64 $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -framework CoreFoundation -framework Security -lpthread
-            artifact_suffix: -macos-amd64
-
-          - target: macos-arm64
-            runner: macos-latest
-            v_os: macos
-            setup_cmd: ""
-            compile_cmd: clang -O3 -arch arm64 $MBED_INCS $APP_NAME.c $MBED_SRCS -o $APP_NAME$SUFFIX -framework CoreFoundation -framework Security -lpthread
-            artifact_suffix: -macos-arm64
 
           - target: freebsd-amd64
             runner: ubuntu-latest
